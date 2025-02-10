@@ -74,7 +74,7 @@ public:
     }
 
     // the Destructible Adaptive Grid Particle System scene
-    bool createScene2(RenderContext* _renderContext){
+    bool createScene1(RenderContext* _renderContext){
         renderContext = _renderContext;
         // skybox
         skyboxTexture = new SkyboxTexture();
@@ -109,128 +109,129 @@ public:
         return true;
     }
 
-    // old scene from my previous project RTRT
-    bool createScene1(RenderContext* _renderContext){
-        renderContext = _renderContext;
-    
-        glm::vec3 rotationAxis = glm::vec3(0, 1, 0);
-        glm::mat4 identity = glm::mat4(1.0);
-        glm::vec3 v0(-1, 2, -0.2);
-        glm::vec3 v1(1, 2, 0.2);
-        glm::vec3 v2(0, 4, 0);
-        
-        
-        // skybox
-        skyboxTexture = new SkyboxTexture();
-        skyboxTexture->loadFromFolder("resource/skybox");
-        skyboxTexture->createSkyboxTexture();
-        GSkybox * _skybox = new GSkybox();
-        _skybox->setShader(new Shader("shaders/skybox_shader.vert", "shaders/skybox_shader.frag"));
-        _skybox->setTexture(skyboxTexture);
-        Skybox * skybox = new Skybox(_skybox);
-        skybox->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(skybox);
-        
-        // waifu, would be a performance bottleneck because of the high triangle count
-        Texture * waifuTexture = new Texture();
-        waifuTexture->loadFromFile("resource/mebius_diffuse.png");
-        waifuTexture->removeAlphaChannel();
-        waifuTexture->resizeData(1024, 1024,3);
-        waifuTexture->createGPUTexture();
-        GModel* waifu = new GModel("resource/mebius.obj");
-        waifu->setSkyboxTexture(skyboxTexture);
-        CommonSceneObject * CommonSceneObject7 = new CommonSceneObject(waifu,OPAQUE,renderContext);
-        CommonSceneObject7->setMaterial(LAMBERTIAN, 1.5, glm::vec4(1.0,1.0,1.0, 1.0), waifuTexture);
-        CommonSceneObject7->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, 2, 2.2)) * glm::rotate(identity, glm::radians(-95.0f), rotationAxis) * glm::scale(glm::mat4(1.0), glm::vec3(0.08, 0.08, 0.08)));
-        CommonSceneObject7->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(CommonSceneObject7);
-        
-        
-        // the ground sphere
-        GSphere * sphereObject2 = new GSphere();
-        sphereObject2->setSkyboxTexture(skyboxTexture);
-        CommonSceneObject * CommonSceneObject2 = new CommonSceneObject(sphereObject2,OPAQUE,renderContext);
-        CommonSceneObject2->setMaterial(LAMBERTIAN, 0.0, glm::vec4(0.5, 0.5, 0.5, 1.0));
-        CommonSceneObject2->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, -100, 0)) * glm::scale(glm::mat4(1.0), glm::vec3(100, 100, 100)));
-        CommonSceneObject2->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(CommonSceneObject2);
-        
-        // the earth sphere
-        Texture * earthTexture = new Texture();
-        earthTexture->loadFromFile("resource/earthmap.jpg");
-        earthTexture->createGPUTexture();
-        GSphere* sphereObject3 = new GSphere();
-        sphereObject3->setSkyboxTexture(skyboxTexture);
-        CommonSceneObject * CommonSceneObject3 = new CommonSceneObject(sphereObject3,OPAQUE,renderContext);
-        CommonSceneObject3->setMaterial(LAMBERTIAN, 0.0, glm::vec4(1.0, 1.0, 1.0, 1.0), earthTexture);
-        CommonSceneObject3->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, 1, 2.2)) * glm::rotate(identity, glm::radians(90.0f), rotationAxis) *glm::scale(glm::mat4(1.0), glm::vec3(1, 1, 1)));
-        CommonSceneObject3->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(CommonSceneObject3);
-        
-        // the metal sphere
-        GSphere* sphereObject4 = new GSphere();
-        sphereObject4->setSkyboxTexture(skyboxTexture);
-        CommonSceneObject * CommonSceneObject4 = new CommonSceneObject(sphereObject4,OPAQUE,renderContext);
-        CommonSceneObject4->setMaterial(METAL, 0.2, glm::vec4(0.7, 0.6, 0.5, 1.0));
-        CommonSceneObject4->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, 1, 0)) * glm::scale(glm::mat4(1.0), glm::vec3(1, 1, 1)));
-        CommonSceneObject4->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(CommonSceneObject4);
-
-
-        // diffuse light sphere
-        GSphere* sphereObject5 = new GSphere();
-        sphereObject5->setSkyboxTexture(skyboxTexture);
-        CommonSceneObject * CommonSceneObject5 = new CommonSceneObject(sphereObject5,OPAQUE,renderContext);
-        CommonSceneObject5->setMaterial(EMISSIVE, 0.0, glm::vec4(2, 2, 2, 1.0));
-        CommonSceneObject5->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(1.5, 0.45, 0)) * glm::scale(glm::mat4(1.0), glm::vec3(0.5, 0.5, 0.5)));
-        CommonSceneObject5->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(CommonSceneObject5);
-
-        // record the light source to sceneObjects
-        PointLight * sphereObject5Light = new PointLight(glm::vec3(1.5, 0.45, 0), glm::vec3(2, 2, 2));
-        sceneObjects.push_back(sphereObject5Light); // then such light can be updated in the logic loop by ticking its component
-        sceneLights.push_back(sphereObject5Light);
-        // add periodic translation component to the light source mesh
-        std::unique_ptr<ObjectPeriodicTranslationComponent> sphereObject5TranslationComponent = std::make_unique<ObjectPeriodicTranslationComponent>(glm::vec3(0, 0, 1), glm::vec3(0, 0, 1));
-        CommonSceneObject5->addComponent(std::move(sphereObject5TranslationComponent));
-        // we also update the light source Light object in the logic loop by ticking its component
-        std::unique_ptr<ObjectPeriodicTranslationComponent> sphereObject5TranslationComponent2 = std::make_unique<ObjectPeriodicTranslationComponent>(glm::vec3(0, 0, 1), glm::vec3(0, 0, 1));
-        sphereObject5Light->addComponent(std::move(sphereObject5TranslationComponent2));
-        
-        
-        GTriangle* triangleObject = new GTriangle(v0, v1, v2);
-        triangleObject->setSkyboxTexture(skyboxTexture);
-        CommonSceneObject * CommonSceneObject6 = new CommonSceneObject(triangleObject,OPAQUE,renderContext);
-        CommonSceneObject6->setMaterial(LAMBERTIAN, 0.0, glm::vec4(0.5, 0.5, 0.5, 1.0));
-        CommonSceneObject6->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, 0, 0)) * glm::scale(glm::mat4(1.0), glm::vec3(1, 1, 1)));
-        CommonSceneObject6->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(CommonSceneObject6);
-        
-        // the cube
-        Texture * cubeTexture = new Texture();
-        cubeTexture->loadFromFile("resource/night.png");
-        cubeTexture->createGPUTexture();
-        GModel* cubeObject = new GModel("resource/cube.obj");
-        cubeObject->setSkyboxTexture(skyboxTexture);
-        CommonSceneObject * CommonSceneObject8 = new CommonSceneObject(cubeObject,OPAQUE,renderContext);
-        CommonSceneObject8->setMaterial(LAMBERTIAN, 0.0, glm::vec4(1.0, 1.0, 1.0, 1.0), cubeTexture);
-        CommonSceneObject8->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(1.5, 0.5, 2.0)) * glm::scale(glm::mat4(1.0), glm::vec3(0.5, 0.5, 0.5)));
-        CommonSceneObject8->attachToSceneRenderList(renderQueue);
-        // add rotation component to the cube
-        std::unique_ptr<ObjectRotationComponent> cubeRotationComponent = std::make_unique<ObjectRotationComponent>(4.0f);
-        CommonSceneObject8->addComponent(std::move(cubeRotationComponent));
-        sceneObjects.push_back(CommonSceneObject8);
-
-        
-        // the glass sphere (transparent object in rendering order)
-        GSphere * sphereObject = new GSphere();
-        sphereObject->setSkyboxTexture(skyboxTexture);
-        CommonSceneObject * CommonSceneObject1 = new CommonSceneObject(sphereObject,TRANSPARENT,renderContext);
-        CommonSceneObject1->setMaterial(DIELECTRIC, 1.5, glm::vec4(0.3, 0.4, 0.8, 0.6));
-        CommonSceneObject1->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, 1, -2.2)) * glm::scale(glm::mat4(1.0), glm::vec3(1, 1, 1)));
-        CommonSceneObject1->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(CommonSceneObject1);
-        return true;
+    // old scene from my previous project RTRT， just for reference
+    bool createScene2(RenderContext* _renderContext){
+//        renderContext = _renderContext;
+//    
+//        glm::vec3 rotationAxis = glm::vec3(0, 1, 0);
+//        glm::mat4 identity = glm::mat4(1.0);
+//        glm::vec3 v0(-1, 2, -0.2);
+//        glm::vec3 v1(1, 2, 0.2);
+//        glm::vec3 v2(0, 4, 0);
+//        
+//        
+//        // skybox
+//        skyboxTexture = new SkyboxTexture();
+//        skyboxTexture->loadFromFolder("resource/skybox");
+//        skyboxTexture->createSkyboxTexture();
+//        GSkybox * _skybox = new GSkybox();
+//        _skybox->setShader(new Shader("shaders/skybox_shader.vert", "shaders/skybox_shader.frag"));
+//        _skybox->setTexture(skyboxTexture);
+//        Skybox * skybox = new Skybox(_skybox);
+//        skybox->attachToSceneRenderList(renderQueue);
+//        sceneObjects.push_back(skybox);
+//        
+//        // waifu, would be a performance bottleneck because of the high triangle count
+//        Texture * waifuTexture = new Texture();
+//        waifuTexture->loadFromFile("resource/mebius_diffuse.png");
+//        waifuTexture->removeAlphaChannel();
+//        waifuTexture->resizeData(1024, 1024,3);
+//        waifuTexture->createGPUTexture();
+//        GModel* waifu = new GModel("resource/mebius.obj");
+//        waifu->setSkyboxTexture(skyboxTexture);
+//        CommonSceneObject * CommonSceneObject7 = new CommonSceneObject(waifu,OPAQUE,renderContext);
+//        CommonSceneObject7->setMaterial(LAMBERTIAN, 1.5, glm::vec4(1.0,1.0,1.0, 1.0), waifuTexture);
+//        CommonSceneObject7->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, 2, 2.2)) * glm::rotate(identity, glm::radians(-95.0f), rotationAxis) * glm::scale(glm::mat4(1.0), glm::vec3(0.08, 0.08, 0.08)));
+//        CommonSceneObject7->attachToSceneRenderList(renderQueue);
+//        sceneObjects.push_back(CommonSceneObject7);
+//        
+//        
+//        // the ground sphere
+//        GSphere * sphereObject2 = new GSphere();
+//        sphereObject2->setSkyboxTexture(skyboxTexture);
+//        CommonSceneObject * CommonSceneObject2 = new CommonSceneObject(sphereObject2,OPAQUE,renderContext);
+//        CommonSceneObject2->setMaterial(LAMBERTIAN, 0.0, glm::vec4(0.5, 0.5, 0.5, 1.0));
+//        CommonSceneObject2->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, -100, 0)) * glm::scale(glm::mat4(1.0), glm::vec3(100, 100, 100)));
+//        CommonSceneObject2->attachToSceneRenderList(renderQueue);
+//        sceneObjects.push_back(CommonSceneObject2);
+//        
+//        // the earth sphere
+//        Texture * earthTexture = new Texture();
+//        earthTexture->loadFromFile("resource/earthmap.jpg");
+//        earthTexture->createGPUTexture();
+//        GSphere* sphereObject3 = new GSphere();
+//        sphereObject3->setSkyboxTexture(skyboxTexture);
+//        CommonSceneObject * CommonSceneObject3 = new CommonSceneObject(sphereObject3,OPAQUE,renderContext);
+//        CommonSceneObject3->setMaterial(LAMBERTIAN, 0.0, glm::vec4(1.0, 1.0, 1.0, 1.0), earthTexture);
+//        CommonSceneObject3->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, 1, 2.2)) * glm::rotate(identity, glm::radians(90.0f), rotationAxis) *glm::scale(glm::mat4(1.0), glm::vec3(1, 1, 1)));
+//        CommonSceneObject3->attachToSceneRenderList(renderQueue);
+//        sceneObjects.push_back(CommonSceneObject3);
+//        
+//        // the metal sphere
+//        GSphere* sphereObject4 = new GSphere();
+//        sphereObject4->setSkyboxTexture(skyboxTexture);
+//        CommonSceneObject * CommonSceneObject4 = new CommonSceneObject(sphereObject4,OPAQUE,renderContext);
+//        CommonSceneObject4->setMaterial(METAL, 0.2, glm::vec4(0.7, 0.6, 0.5, 1.0));
+//        CommonSceneObject4->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, 1, 0)) * glm::scale(glm::mat4(1.0), glm::vec3(1, 1, 1)));
+//        CommonSceneObject4->attachToSceneRenderList(renderQueue);
+//        sceneObjects.push_back(CommonSceneObject4);
+//
+//
+//        // diffuse light sphere
+//        GSphere* sphereObject5 = new GSphere();
+//        sphereObject5->setSkyboxTexture(skyboxTexture);
+//        CommonSceneObject * CommonSceneObject5 = new CommonSceneObject(sphereObject5,OPAQUE,renderContext);
+//        CommonSceneObject5->setMaterial(EMISSIVE, 0.0, glm::vec4(2, 2, 2, 1.0));
+//        CommonSceneObject5->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(1.5, 0.45, 0)) * glm::scale(glm::mat4(1.0), glm::vec3(0.5, 0.5, 0.5)));
+//        CommonSceneObject5->attachToSceneRenderList(renderQueue);
+//        sceneObjects.push_back(CommonSceneObject5);
+//
+//        // record the light source to sceneObjects
+//        PointLight * sphereObject5Light = new PointLight(glm::vec3(1.5, 0.45, 0), glm::vec3(2, 2, 2));
+//        sceneObjects.push_back(sphereObject5Light); // then such light can be updated in the logic loop by ticking its component
+//        sceneLights.push_back(sphereObject5Light);
+//        // add periodic translation component to the light source mesh
+//        std::unique_ptr<ObjectPeriodicTranslationComponent> sphereObject5TranslationComponent = std::make_unique<ObjectPeriodicTranslationComponent>(glm::vec3(0, 0, 1), glm::vec3(0, 0, 1));
+//        CommonSceneObject5->addComponent(std::move(sphereObject5TranslationComponent));
+//        // we also update the light source Light object in the logic loop by ticking its component
+//        std::unique_ptr<ObjectPeriodicTranslationComponent> sphereObject5TranslationComponent2 = std::make_unique<ObjectPeriodicTranslationComponent>(glm::vec3(0, 0, 1), glm::vec3(0, 0, 1));
+//        sphereObject5Light->addComponent(std::move(sphereObject5TranslationComponent2));
+//        
+//        
+//        GTriangle* triangleObject = new GTriangle(v0, v1, v2);
+//        triangleObject->setSkyboxTexture(skyboxTexture);
+//        CommonSceneObject * CommonSceneObject6 = new CommonSceneObject(triangleObject,OPAQUE,renderContext);
+//        CommonSceneObject6->setMaterial(LAMBERTIAN, 0.0, glm::vec4(0.5, 0.5, 0.5, 1.0));
+//        CommonSceneObject6->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, 0, 0)) * glm::scale(glm::mat4(1.0), glm::vec3(1, 1, 1)));
+//        CommonSceneObject6->attachToSceneRenderList(renderQueue);
+//        sceneObjects.push_back(CommonSceneObject6);
+//        
+//        // the cube
+//        Texture * cubeTexture = new Texture();
+//        cubeTexture->loadFromFile("resource/night.png");
+//        cubeTexture->createGPUTexture();
+//        GModel* cubeObject = new GModel("resource/cube.obj");
+//        cubeObject->setSkyboxTexture(skyboxTexture);
+//        CommonSceneObject * CommonSceneObject8 = new CommonSceneObject(cubeObject,OPAQUE,renderContext);
+//        CommonSceneObject8->setMaterial(LAMBERTIAN, 0.0, glm::vec4(1.0, 1.0, 1.0, 1.0), cubeTexture);
+//        CommonSceneObject8->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(1.5, 0.5, 2.0)) * glm::scale(glm::mat4(1.0), glm::vec3(0.5, 0.5, 0.5)));
+//        CommonSceneObject8->attachToSceneRenderList(renderQueue);
+//        // add rotation component to the cube
+//        std::unique_ptr<ObjectRotationComponent> cubeRotationComponent = std::make_unique<ObjectRotationComponent>(4.0f);
+//        CommonSceneObject8->addComponent(std::move(cubeRotationComponent));
+//        sceneObjects.push_back(CommonSceneObject8);
+//
+//        
+//        // the glass sphere (transparent object in rendering order)
+//        GSphere * sphereObject = new GSphere();
+//        sphereObject->setSkyboxTexture(skyboxTexture);
+//        CommonSceneObject * CommonSceneObject1 = new CommonSceneObject(sphereObject,TRANSPARENT,renderContext);
+//        CommonSceneObject1->setMaterial(DIELECTRIC, 1.5, glm::vec4(0.3, 0.4, 0.8, 0.6));
+//        CommonSceneObject1->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, 1, -2.2)) * glm::scale(glm::mat4(1.0), glm::vec3(1, 1, 1)));
+//        CommonSceneObject1->attachToSceneRenderList(renderQueue);
+//        sceneObjects.push_back(CommonSceneObject1);
+//        return true;
+        return false;
     }
 
 };

@@ -25,7 +25,7 @@ int main() {
     RenderContext * renderContext = renderer.context; // get the render context from the renderer
     // -----------------------------------------------------------------------------------------
     // ------------------------------ create Scene object --------------------------------------
-    Scene Scene(renderContext,SCENE2); // create Scene object, which contains all the objects in the Scene
+    Scene Scene(renderContext,SCENE1); // create Scene object, which contains all the objects in the Scene
     std::cout<<"scene created"<<std::endl;
     // -----------------------------------------------------------------------------------------
     // ------------------------------ create camera controller object --------------------------
