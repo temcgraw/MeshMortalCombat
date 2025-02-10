@@ -1,0 +1,3 @@
+D:\app\cmake_3_17_3\bin\cmake.exe -E rm -f CMakeFiles\sharing.dir/objects.a
+D:\app\msys2\mingw64\bin\ar.exe cr CMakeFiles\sharing.dir/objects.a @CMakeFiles\sharing.dir\objects1.rsp
+D:\app\msys2\mingw64\bin\gcc.exe   -mwindows -Wl,--whole-archive CMakeFiles\sharing.dir/objects.a -Wl,--no-whole-archive  -o sharing.exe -Wl,--out-implib,libsharing.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\sharing.dir\linklibs.rsp

@@ -1,0 +1,268 @@
+#version 460
+
+#ifndef LOCAL_SIZE
+#define LOCAL_SIZE 256
+#endif
+layout(local_size_x = LOCAL_SIZE) in;
+
+
+const int kGridUboBinding = 1;
+
+const int kPointsInBinding = 2;
+const int kPointsOutBinding = 3;
+const int kCountBinding = 4;
+const int kStartBinding = 5;
+const int kVoxelConstraintsBinding = 7;
+
+
+
+const float eps = 1e-9;
+layout(location = 0) uniform int uMode=5; 
+layout(location = 2) uniform ivec3 uGridStride = ivec3(8,1,1); // this should be 8 for 3D, 4 for 2D
+layout(location = 11) uniform float uAlpha = 0.75;
+layout(location = 12) uniform float uAlphaLen = 0.0;
+
+layout (std140, binding = kGridUboBinding) uniform DESTRUCTIVE_SYSTEM_DATA
+{
+    int numParticles;
+    int numCells;
+    vec3 gridMin;
+    vec3 gridMax;
+    ivec3 gridRes;
+	vec3 cellSize;
+    int maxCellsPerElement;
+    vec4 wallConstraints[6];
+    vec4 g;
+    float dt;
+    float c;
+    float omega_collision; // collision stiffness
+} systemUBO;
+
+
+//TODO clean up
+const int MODE_CONSTRAINT_GRID = 5;
+
+
+
+
+
+
+
+struct XpbdParticle
+{
+   vec4 xpos;	//xpos.w == radius
+   vec4 xprev;	//xprev.w == w (1.0/mass);
+   vec4 vel;	//vel.w = mu (coefficent of friction)
+   uvec4 flags; //flags.y = lod, flags.z = type, flags.w = rgba8 color
+};
+
+
+// not implemented yet
+const uint XpbdMouseover = 1<<31;
+const uint XpbdSelected = 1<<30;
+const uint XpbdDragged = 1<<29;
+const uint XpbdDefaultType = ~0;
+
+float GetRadius(XpbdParticle p) {return p.xpos.w;}
+void SetRadius(inout XpbdParticle p, float r) {p.xpos.w = r;}
+
+bool IsDragged(XpbdParticle p) {return bool(p.flags[0] & XpbdDragged);}
+bool IsDragged(uint flags) {return bool(flags & XpbdDragged);}
+
+float GetW(XpbdParticle p) {if(IsDragged(p)) return 0.0; return p.xprev.w;}
+void SetW(inout XpbdParticle p, float w) {p.xprev.w = w;}
+bool IsDeleted(XpbdParticle p) {return p.xprev.w<0.0;}
+
+float GetMu(XpbdParticle p) {return p.vel.w;}
+void SetMu(inout XpbdParticle p, float w) {p.vel.w = w;}
+
+uint GetType(XpbdParticle p)  {return p.flags.z;}
+void SetType(inout XpbdParticle p, uint type) {p.flags.z = type;}
+
+vec4 GetColor(XpbdParticle p) {return unpackUnorm4x8(p.flags.w);}
+void SetColor(inout XpbdParticle p, vec4 color) {p.flags.w = packUnorm4x8(color);}
+
+bool IsSelected(XpbdParticle p) {return bool(p.flags[0] & XpbdSelected);}
+bool IsSelected(uint flags) {return bool(flags & XpbdSelected);}
+
+
+
+
+struct VoxelFaceConstraint
+{
+	ivec4 mEnd;//mEnd[0]=voxel0 base vertex, mEnd[1] = voxel1 base vertex, mEnd[2] = face0_id
+	vec2 mStrainLimit;
+	vec2 mPadding;
+};
+
+int GetBaseVertex0(VoxelFaceConstraint con) { return con.mEnd[0]; }
+int GetBaseVertex1(VoxelFaceConstraint con) { return con.mEnd[1]; }
+int GetFace0(VoxelFaceConstraint con) { return con.mEnd[2]; }
+
+bool IsDeleted(VoxelFaceConstraint con) { return con.mEnd[0] == -1 || con.mEnd[1] == -1 || con.mEnd[2] == -1; }
+
+
+
+
+layout (std430, binding = kPointsInBinding) restrict buffer PARTICLES_INOUT
+{
+	XpbdParticle particles[];
+};
+layout (std430, binding = kVoxelConstraintsBinding) restrict readonly buffer VOXELS
+{
+	int voxelConstraints[];
+};
+
+
+
+
+
+void VGS(int ix);
+
+void main()
+{
+	int vox_id = int(gl_GlobalInvocationID.x);
+	if(uGridStride.x*vox_id >= particles.length()) return;
+	
+	switch(uMode)
+	{
+		case MODE_CONSTRAINT_GRID:
+			VGS(vox_id);
+			return;
+		break;
+	}
+}
+
+
+//orthogonal projection of v onto u
+vec3 proj(vec3 u, vec3 v)
+{
+	const float eps = 1e-12;
+	return dot(v,u)/(dot(u,u)+eps)*u;	
+}
+
+void SetColor(inout XpbdParticle prt[8], vec4 c)
+{
+	for(int i=0; i<8; i++)
+	{
+		SetColor(prt[i], c);
+	}
+}
+
+int index_of_min(vec3 v)
+{
+	if(v[0]<=v[1])
+	{
+		if(v[0]<=v[2]) return 0;
+	}
+	else //v[1] < v[0]
+	{
+		if(v[1] <= v[2]) return 1;
+	}
+	return 2;
+}
+
+void VGS(int vox_id)
+{
+	XpbdParticle prt[8];
+	int base_particle = uGridStride.x * vox_id;
+	base_particle = voxelConstraints[uGridStride.x * vox_id];
+
+
+	float sum_w = 0.0;
+	for (int i = 0; i < uGridStride.x; i++)
+	{
+		int part_ix = base_particle + i;
+		prt[i] = particles[part_ix];
+		sum_w += GetW(prt[i]);
+		if(IsDeleted(prt[i])) return;
+	}
+
+	//Voxel is static
+	if(sum_w==0.0)
+	{
+		return;
+	}
+
+	vec3 dp[3];
+	vec3 cen;
+	float r = GetRadius(prt[0]);
+
+	for (int con_it = 0; con_it < 3; con_it++)
+	{
+		//x dir
+		dp[0] = (prt[1].xpos.xyz - prt[0].xpos.xyz)
+				+ (prt[3].xpos.xyz - prt[2].xpos.xyz)
+				+ (prt[5].xpos.xyz - prt[4].xpos.xyz)
+				+ (prt[7].xpos.xyz - prt[6].xpos.xyz);
+
+		//y dir
+		dp[1] = (prt[2].xpos.xyz - prt[0].xpos.xyz)
+				+ (prt[3].xpos.xyz - prt[1].xpos.xyz)
+				+ (prt[6].xpos.xyz - prt[4].xpos.xyz)
+				+ (prt[7].xpos.xyz - prt[5].xpos.xyz);
+
+		//z dir
+		dp[2] = (prt[4].xpos.xyz - prt[0].xpos.xyz)
+				+ (prt[5].xpos.xyz - prt[1].xpos.xyz)
+				+ (prt[6].xpos.xyz - prt[2].xpos.xyz)
+				+ (prt[7].xpos.xyz - prt[3].xpos.xyz);
+
+		cen	= (prt[0].xpos.xyz + prt[1].xpos.xyz
+				+ prt[2].xpos.xyz + prt[3].xpos.xyz
+				+ prt[4].xpos.xyz + prt[5].xpos.xyz
+				+ prt[6].xpos.xyz + prt[7].xpos.xyz) * 0.125;
+
+		vec3 u[3];
+		u[0] = dp[0] - uAlpha*(proj(dp[1], dp[0]) + proj(dp[2], dp[0]));
+		u[1] = dp[1] - uAlpha*(proj(dp[0], dp[1]) + proj(dp[2], dp[1]));
+		u[2] = dp[2] - uAlpha*(proj(dp[0], dp[2]) + proj(dp[1], dp[2]));
+
+		vec3 lenu = vec3(length(u[0]), length(u[1]), length(u[2])) + vec3(1e-12);
+
+		//prevent flip
+		float V = dot(cross(u[0], u[1]), u[2]);
+		if (V < 0.0)
+		{
+			int mix_ix = index_of_min(lenu);
+			u[mix_ix] = -u[mix_ix];
+			//SetColor(prt, vec4(1.0, 1.0, 0.0, 1.0));//yellow
+		}
+		else
+		{
+			//SetColor(prt, vec4(1.0, 1.0, 1.0, 1.0));
+		}
+
+		const float eps = 1e-12;
+		//dp[0] = u[0]/len[0] * r;
+		//dp[1] = u[1]/len[1] * r;
+		//dp[2] = u[2]/len[2] * r;
+		
+		vec3 lenp = vec3(length(dp[0]), length(dp[1]), length(dp[2])) + vec3(1e-12);
+		float r_v = pow(r * r * r / (lenp[0] * lenp[1] * lenp[2]), 0.3333);
+		dp[0] = u[0]/lenu[0] * mix(r, lenp[0] * r_v, uAlphaLen);
+		dp[1] = u[1]/lenu[1] * mix(r, lenp[1] * r_v, uAlphaLen);
+		dp[2] = u[2]/lenu[2] * mix(r, lenp[2] * r_v, uAlphaLen);
+
+		if (GetW(prt[0]) != 0.0) prt[0].xpos.xyz = cen - dp[0] - dp[1] - dp[2];
+		if (GetW(prt[1]) != 0.0) prt[1].xpos.xyz = cen + dp[0] - dp[1] - dp[2];
+		if (GetW(prt[2]) != 0.0) prt[2].xpos.xyz = cen - dp[0] + dp[1] - dp[2];
+		if (GetW(prt[3]) != 0.0) prt[3].xpos.xyz = cen + dp[0] + dp[1] - dp[2];
+		if (GetW(prt[4]) != 0.0) prt[4].xpos.xyz = cen - dp[0] - dp[1] + dp[2];
+		if (GetW(prt[5]) != 0.0) prt[5].xpos.xyz = cen + dp[0] - dp[1] + dp[2];
+		if (GetW(prt[6]) != 0.0) prt[6].xpos.xyz = cen - dp[0] + dp[1] + dp[2];
+		if (GetW(prt[7]) != 0.0) prt[7].xpos.xyz = cen + dp[0] + dp[1] + dp[2];
+	}
+
+	for (int i = 0; i < uGridStride.x; i++)
+	{
+		int part_ix = base_particle + i;
+		if (GetW(prt[i]) != 0.0) particles[part_ix] = prt[i];
+	}
+}
+
+
+const vec3 q[8] = vec3[](vec3(-1.0, -1.0, -1.0), vec3(+1.0, -1.0, -1.0),
+						vec3(-1.0, +1.0, -1.0), vec3(+1.0, +1.0, -1.0),
+						vec3(-1.0, -1.0, +1.0), vec3(+1.0, -1.0, +1.0),
+						vec3(-1.0, +1.0, +1.0), vec3(+1.0, +1.0, +1.0));

@@ -1,0 +1,402 @@
+#version 460
+
+#ifndef LOCAL_SIZE
+#define LOCAL_SIZE 64
+#endif
+layout(local_size_x = LOCAL_SIZE) in;
+
+const int kGridUboBinding = 1;
+
+const int kPointsInBinding = 2;
+const int kPointsOutBinding = 3;
+const int kCountBinding = 4;
+const int kStartBinding = 5;
+const int kVoxelConstraintsBinding = 7;
+const int kFaceConstraintsBinding = 8;
+
+
+const float eps = 1e-9;
+layout(location = 0) uniform int uMode=5; 
+layout(location = 2) uniform ivec3 uGridStride = ivec3(8,1,1); // this should be 8 for 3D, 4 for 2D
+layout(location = 11) uniform float uAlpha = 0.75;
+layout(location = 12) uniform float uAlphaLen = 0.0;
+
+layout (std140, binding = kGridUboBinding) uniform DESTRUCTIVE_SYSTEM_DATA
+{
+    int numParticles;
+    int numCells;
+    vec3 gridMin;
+    vec3 gridMax;
+    ivec3 gridRes;
+	vec3 cellSize;
+    int maxCellsPerElement;
+    vec4 wallConstraints[6];
+    vec4 g;
+    float dt;
+    float c;
+    float omega_collision; // collision stiffness
+} systemUBO;
+
+
+//TODO clean up
+const int MODE_CONSTRAINT_GRID = 5;
+
+
+
+
+
+
+
+struct XpbdParticle
+{
+   vec4 xpos;	//xpos.w == radius
+   vec4 xprev;	//xprev.w == w (1.0/mass);
+   vec4 vel;	//vel.w = mu (coefficent of friction)
+   uvec4 flags; //flags.y = lod, flags.z = type, flags.w = rgba8 color
+};
+
+
+// not implemented yet
+const uint XpbdMouseover = 1<<31;
+const uint XpbdSelected = 1<<30;
+const uint XpbdDragged = 1<<29;
+const uint XpbdDefaultType = ~0;
+
+float GetRadius(XpbdParticle p) {return p.xpos.w;}
+void SetRadius(inout XpbdParticle p, float r) {p.xpos.w = r;}
+
+bool IsDragged(XpbdParticle p) {return bool(p.flags[0] & XpbdDragged);}
+bool IsDragged(uint flags) {return bool(flags & XpbdDragged);}
+
+float GetW(XpbdParticle p) {if(IsDragged(p)) return 0.0; return p.xprev.w;}
+void SetW(inout XpbdParticle p, float w) {p.xprev.w = w;}
+bool IsDeleted(XpbdParticle p) {return p.xprev.w<0.0;}
+
+float GetMu(XpbdParticle p) {return p.vel.w;}
+void SetMu(inout XpbdParticle p, float w) {p.vel.w = w;}
+
+uint GetType(XpbdParticle p)  {return p.flags.z;}
+void SetType(inout XpbdParticle p, uint type) {p.flags.z = type;}
+
+vec4 GetColor(XpbdParticle p) {return unpackUnorm4x8(p.flags.w);}
+void SetColor(inout XpbdParticle p, vec4 color) {p.flags.w = packUnorm4x8(color);}
+
+bool IsSelected(XpbdParticle p) {return bool(p.flags[0] & XpbdSelected);}
+bool IsSelected(uint flags) {return bool(flags & XpbdSelected);}
+
+
+
+
+struct VoxelFaceConstraint
+{
+	ivec4 mEnd;//mEnd[0]=voxel0 base vertex, mEnd[1] = voxel1 base vertex, mEnd[2] = face0_id
+	vec2 mStrainLimit;
+	vec2 mPadding;
+};
+
+int GetBaseVertex0(VoxelFaceConstraint con) { return con.mEnd[0]; }
+int GetBaseVertex1(VoxelFaceConstraint con) { return con.mEnd[1]; }
+int GetFace0(VoxelFaceConstraint con) { return con.mEnd[2]; }
+
+bool IsDeleted(VoxelFaceConstraint con) { return con.mEnd[0] == -1 || con.mEnd[1] == -1 || con.mEnd[2] == -1; }
+
+
+//https://www.shadertoy.com/view/NtjyWw
+
+const uint k_hash = 1103515245U;  // GLIB C
+
+vec3 uhash3( uvec3 x )  
+{
+    x = ((x>>8U)^x.yzx)*k_hash;
+    x = ((x>>8U)^x.yzx)*k_hash;
+    x = ((x>>8U)^x.yzx)*k_hash;
+    
+    return vec3(x)/float(0xffffffffU);
+}
+
+vec3 hash( vec3 f )      
+{ 
+    return uhash3( uvec3( floatBitsToUint(f.x),
+                          floatBitsToUint(f.y),
+                          floatBitsToUint(f.z) ) );
+}
+
+
+layout (std430, binding = kFaceConstraintsBinding) restrict buffer FACES 
+{
+	VoxelFaceConstraint mConstraint[];
+};
+
+layout (std430, binding = kPointsInBinding) restrict buffer PARTICLES_INOUT
+{
+	XpbdParticle particles[];
+};
+
+
+void ProjVoxelFaceConstraint(int ix);
+void ZeroLambda(int ix);
+
+void main()
+{
+	int gid = int(gl_GlobalInvocationID.x);
+	if(gid >= mConstraint.length()) return;
+
+	if(uMode==0) ZeroLambda(gid);
+	else
+	{
+		ProjVoxelFaceConstraint(gid);
+	}
+}
+
+void ZeroLambda(int ix)
+{
+}
+
+void ProjDistConstraint(inout XpbdParticle pi, inout XpbdParticle pj, float l0);
+
+//orthogonal projection of v onto u
+vec3 proj(vec3 u, vec3 v)
+{
+	const float eps = 1e-12;
+	return dot(v, u) / (dot(u, u) + eps) * u;
+}
+
+void BreakConstraint(int ix)
+{
+	mConstraint[ix].mEnd.xyz = ivec3(-1);
+}
+
+mat3 GetEdgeVecs(vec3 cube[8])
+{
+	mat3 E;
+	E[0] = normalize(cube[1]-cube[0]);
+	E[1] = normalize(cube[2]-cube[0]);
+	E[2] = normalize(cube[4]-cube[0]);
+	return E;
+}
+
+
+void ProjVoxelFaceConstraint(int ix)
+{
+	VoxelFaceConstraint c = mConstraint[ix];
+	if(IsDeleted(c)) return;
+
+	vec3 face0_particles[4];
+	vec3 face1_particles[4];
+
+	float face0_w[4];
+	float face1_w[4];
+
+	const ivec4 faces0[6] = ivec4[](	ivec4(0,2,4,6), ivec4(1,3,5,7),	//neg/pos x-faces
+												ivec4(0,1,4,5), ivec4(2,3,6,7),	//neg/pos y-faces	
+												ivec4(0,1,2,3), ivec4(4,5,6,7));	//neg/pos z-faces
+
+	const ivec4 faces1[6] = ivec4[](	ivec4(1,3,5,7), ivec4(0,2,4,6),	//neg/pos x-faces
+												ivec4(2,3,6,7), ivec4(0,1,4,5),	//neg/pos y-faces
+												ivec4(4,5,6,7), ivec4(0,1,2,3));	//neg/pos z-faces
+
+	int base0 = GetBaseVertex0(c); //first z-order vertex of voxel 0
+	int base1 = GetBaseVertex1(c); //first z-order vertex of voxel 1
+	int face0_ix = GetFace0(c); //which face the constraint is applied to
+
+	//face0_ix==0: vox0 -X to vox1 +X 
+	//face0_ix==1: vox0 +X to vox1 -X 
+	//face0_ix==2: vox0 -Y to vox1 +Y 
+	//face0_ix==3: vox0 +Y to vox1 -Y 
+	//face0_ix==4: vox0 -Z to vox1 +Z 
+	//face0_ix==5: vox0 +Z to vox1 -Z 
+
+	//if(face0_ix == 5) return;
+
+	ivec4 face0 = faces0[face0_ix];
+	ivec4 face1 = faces1[face0_ix];
+
+	float sum0_w = 0.0;
+	float sum1_w = 0.0;
+
+	for(int i=0; i<4; i++)
+	{
+		face0_particles[i] = particles[base0 + face0[i]].xpos.xyz;
+		face0_w[i] = GetW(particles[base0 + face0[i]]);
+		sum0_w += face0_w[i];
+
+		face1_particles[i] = particles[base1 + face1[i]].xpos.xyz;
+		face1_w[i] = GetW(particles[base1 + face1[i]]);
+		sum1_w += face1_w[i];
+	}
+	
+	float r = GetRadius(particles[base0]);
+
+	const bool enable_fracture = true;
+	if(enable_fracture)
+	{//see if constraint should be deleted
+		vec3 rand = uhash3(uvec3(ix));
+		for(int i=0; i<4; i++)
+		{
+			vec3 u = face1_particles[i]-face0_particles[i];
+			float L = length(u);
+			float strain = (L-2.0*r)/(2.0*r);
+			if (strain > c.mStrainLimit[0] || strain < c.mStrainLimit[1])
+			{
+				//separation velocity
+				//particles[base0 + face0[i]].vel.xyz = -0.001*(u+0.01*rand);
+				//particles[base1 + face1[i]].vel.xyz = +0.001*(u+0.01*rand);
+				BreakConstraint(ix);
+				return;
+			}
+		}
+	}
+	
+	vec3 dp[3];
+	vec3 cen;
+
+	if (sum0_w == 0.0 || sum1_w == 0.0) //there is a static voxel
+	{
+		cen = (face0_particles[0] + face0_particles[1]
+				+ face0_particles[2] + face0_particles[3]
+				+ face1_particles[0] + face1_particles[1]
+				+ face1_particles[2] + face1_particles[3]) * 0.125;
+
+		vec3 u0, u1, u2;
+		if (sum0_w == 0.0)//voxel0 is static
+		{
+			u1 = (face0_particles[1] - face0_particles[0])
+				+ (face0_particles[3] - face0_particles[2]);
+
+			u2 = (face0_particles[2] - face0_particles[0])
+				+ (face0_particles[3] - face0_particles[1]);
+		}
+		else if (sum1_w == 0.0) //voxel 1 is static
+		{
+			u1 = (face1_particles[1] - face1_particles[0])
+				+ (face1_particles[3] - face1_particles[2]);
+
+			u2 = (face1_particles[2] - face1_particles[0])
+				+ (face1_particles[3] - face1_particles[1]);
+		}
+		
+		if (face0_ix == 1)
+		{
+			u0 = cross(u1, u2);
+		}
+		if (face0_ix == 3)
+		{
+			u0 = cross(u2, u1);
+		}
+		if (face0_ix == 5)
+		{
+			u0 = cross(u1, u2);
+		}
+
+		//NOTE THE PERMUTATION HERE... TODO FIGURE OUT WHY
+		dp[0] = normalize(u1) * r;
+		dp[1] = normalize(u2) * r;
+		dp[2] = normalize(u0) * r;
+
+		float V = dot(cross(dp[0], dp[1]), dp[2]);
+		if(V<0.0)
+		{
+			//BreakConstraint(ix);
+			//return;
+		}
+
+		if (face0_w[0] != 0.0) face0_particles[0] = cen - dp[0] - dp[1] - dp[2];
+		if (face0_w[1] != 0.0) face0_particles[1] = cen + dp[0] - dp[1] - dp[2];
+		if (face0_w[2] != 0.0) face0_particles[2] = cen - dp[0] + dp[1] - dp[2];
+		if (face0_w[3] != 0.0) face0_particles[3] = cen + dp[0] + dp[1] - dp[2];
+		if (face1_w[0] != 0.0) face1_particles[0] = cen - dp[0] - dp[1] + dp[2];
+		if (face1_w[1] != 0.0) face1_particles[1] = cen + dp[0] - dp[1] + dp[2];
+		if (face1_w[2] != 0.0) face1_particles[2] = cen - dp[0] + dp[1] + dp[2];
+		if (face1_w[3] != 0.0) face1_particles[3] = cen + dp[0] + dp[1] + dp[2];
+	}
+	else //no static voxels
+	{
+		for (int con_it = 0; con_it < 3; con_it++)
+		{
+			//dp[0] is across constraint
+
+			//if dp[0]==x, then dp[1]==y, dp[2]==z
+			//if dp[0]==y, then dp[1]==x, dp[2]==z
+			//if dp[0]==z, then dp[1]==x, dp[2]==y	
+
+			dp[0] = (face1_particles[0] - face0_particles[0])
+					+ (face1_particles[1] - face0_particles[1])
+					+ (face1_particles[2] - face0_particles[2])
+					+ (face1_particles[3] - face0_particles[3]);
+
+			//face e1
+			dp[1] = (face0_particles[1] - face0_particles[0])
+					+ (face0_particles[3] - face0_particles[2])
+					+ (face1_particles[1] - face1_particles[0])
+					+ (face1_particles[3] - face1_particles[2]);
+		
+			//face e2
+			dp[2] = (face0_particles[2] - face0_particles[0])
+					+ (face0_particles[3] - face0_particles[1])
+					+ (face1_particles[2] - face1_particles[0])
+					+ (face1_particles[3] - face1_particles[1]);
+
+			cen = (face0_particles[0] + face0_particles[1]
+					+ face0_particles[2] + face0_particles[3]
+					+ face1_particles[0] + face1_particles[1]
+					+ face1_particles[2] + face1_particles[3]) * 0.125;
+	
+			vec3 u0 = dp[0] - uAlpha*(proj(dp[1], dp[0]) + proj(dp[2], dp[0]));
+			vec3 u1 = dp[1] - uAlpha*(proj(dp[0], dp[1]) + proj(dp[2], dp[1]));
+			vec3 u2 = dp[2] - uAlpha*(proj(dp[0], dp[2]) + proj(dp[1], dp[2]));
+
+			//prevent flip
+			float V = dot(cross(u0, u1), u2);
+			if (face0_ix == 3) V = -V;//HACK TODO FIX THIS
+			if (V<0.0)
+			{
+				BreakConstraint(ix);
+				return;
+			}
+			
+			//dp[0] = normalize(u0) * r;
+			//dp[1] = normalize(u1) * r;
+			//dp[2] = normalize(u2) * r;
+			vec3 lenu = vec3(length(u0), length(u1), length(u2)) + vec3(1e-12);
+			vec3 lenp = vec3(length(dp[0]), length(dp[1]), length(dp[2])) + vec3(1e-12);
+			float r_v = pow(r * r * r / (lenp[0] * lenp[1]* lenp[2]), 0.3333);
+			dp[0] = u0 / lenu[0] * mix(r, lenp[0] * r_v, uAlphaLen);
+			dp[1] = u1 / lenu[1] * mix(r, lenp[1] * r_v, uAlphaLen);
+			dp[2] = u2 / lenu[2] * mix(r, lenp[2] * r_v, uAlphaLen);
+
+
+			if (face0_w[0] != 0.0) face0_particles[0] = cen - dp[0] - dp[1] - dp[2];
+			if (face0_w[1] != 0.0) face0_particles[1] = cen + dp[0] - dp[1] - dp[2];
+			if (face0_w[2] != 0.0) face0_particles[2] = cen - dp[0] + dp[1] - dp[2];
+			if (face0_w[3] != 0.0) face0_particles[3] = cen + dp[0] + dp[1] - dp[2];
+			if (face1_w[0] != 0.0) face1_particles[0] = cen - dp[0] - dp[1] + dp[2];
+			if (face1_w[1] != 0.0) face1_particles[1] = cen + dp[0] - dp[1] + dp[2];
+			if (face1_w[2] != 0.0) face1_particles[2] = cen - dp[0] + dp[1] + dp[2];
+			if (face1_w[3] != 0.0) face1_particles[3] = cen + dp[0] + dp[1] + dp[2];
+		}
+	}
+    
+	for (int i = 0; i < 4; i++)
+	{
+		if (face0_w[i] != 0.0) particles[base0 + face0[i]].xpos.xyz = face0_particles[i];
+		if (face1_w[i] != 0.0) particles[base1 + face1[i]].xpos.xyz = face1_particles[i];
+	}
+
+}
+
+void ProjDistConstraint(inout XpbdParticle pi, inout XpbdParticle pj, float l0)
+{
+
+	const float alpha = 1e-6;
+
+	float l = distance(pi.xpos.xyz, pj.xpos.xyz);
+	float C = l - l0;
+	vec3 gradCi = (pi.xpos.xyz - pj.xpos.xyz) / l;
+	float lambda = -C / (2.0 + alpha / (systemUBO.dt * systemUBO.dt));
+
+	vec3 dx = lambda * gradCi;
+
+	pi.xpos.xyz += 0.5*dx;
+	pj.xpos.xyz -= 0.5*dx;
+
+}

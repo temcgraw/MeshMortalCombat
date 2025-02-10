@@ -1,0 +1,596 @@
+#version 460
+
+
+#ifndef LOCAL_SIZE_COMMON
+#define LOCAL_SIZE_COMMON 1024
+#endif
+layout(local_size_x = LOCAL_SIZE_COMMON) in;
+
+
+struct aabb3D
+{
+   vec4 mMin;
+   vec4 mMax;
+};
+
+bool overlap(aabb3D a, aabb3D b)
+{
+
+   if(a.mMax.x < b.mMin.x || b.mMax.x < a.mMin.x) {return false;}
+   if(a.mMax.y < b.mMin.y || b.mMax.y < a.mMin.y) {return false;}
+   if(a.mMax.z < b.mMin.z || b.mMax.z < a.mMin.z) {return false;}
+   return true;
+}
+
+struct XpbdParticle
+{
+   vec4 xpos;	//xpos.w == radius
+   vec4 xprev;	//xprev.w == w (1.0/mass);
+   vec4 vel;	//vel.w = mu (coefficent of friction)
+   uvec4 flags; //flags.y = lod, flags.z = type, flags.w = rgba8 color
+};
+
+const uint XpbdMouseover = 1<<31;
+const uint XpbdSelected = 1<<30;
+const uint XpbdDragged = 1<<29;
+const uint XpbdDefaultType = ~0;
+
+float GetRadius(XpbdParticle p) {return p.xpos.w;}
+void SetRadius(inout XpbdParticle p, float r) {p.xpos.w = r;}
+
+bool IsDragged(XpbdParticle p) {return bool(p.flags[0] & XpbdDragged);}
+bool IsDragged(uint flags) {return bool(flags & XpbdDragged);}
+
+float GetW(XpbdParticle p) {if(IsDragged(p)) return 0.0; return p.xprev.w;}
+void SetW(inout XpbdParticle p, float w) {p.xprev.w = w;}
+
+
+
+
+
+
+// ?????
+struct FrictionConstraint
+{
+	vec4 mNormal; //.xyz == unit normal, w = magnitude
+};
+
+
+//------------------------------------------------------------------------
+
+const int kGridUboBinding = 1;
+
+const int kPointsInBinding = 2;
+const int kPointsOutBinding = 3;
+const int kCountBinding = 4;
+const int kStartBinding = 5;
+const int kContentBinding = 6;
+//const int kFrictionBinding = 5;
+
+const float eps = 1e-6;
+
+layout (std430, binding = kPointsInBinding) restrict readonly buffer PARTICLES_IN 
+{
+	XpbdParticle particles_in[];
+};
+
+layout (std430, binding = kPointsOutBinding) restrict writeonly buffer PARTICLES_OUT 
+{
+	XpbdParticle particles_out[];
+};
+
+layout (std430, binding = kCountBinding) restrict readonly buffer GRID_COUNTER 
+{
+	int mCount[];
+};
+
+layout (std430, binding = kStartBinding) restrict readonly buffer GRID_START 
+{
+	int mStart[];
+};
+
+layout (std430, binding = kContentBinding) restrict readonly buffer CONTENT_LIST 
+{
+	int mContent[];
+};
+//
+//layout(std430, binding = kFrictionBinding) restrict buffer FRICTION
+//{
+//	FrictionConstraint mFriction[];
+//};
+
+
+layout (std140, binding = kGridUboBinding) uniform DESTRUCTIVE_SYSTEM_DATA
+{
+    int numParticles;
+    int numCells;
+    vec3 gridMin;
+    vec3 gridMax;
+    ivec3 gridRes;
+	vec3 cellSize;
+    int maxCellsPerElement;
+    vec4 wallConstraints[6];
+    vec4 g;
+    float dt;
+    float c;
+    float omega_collision; // collision stiffness
+} systemUBO;
+
+
+ivec3 CellCoord(vec3 p)
+{
+   p = p-systemUBO.gridMin;
+   ivec3 cell = ivec3(floor(p/systemUBO.cellSize));
+   cell = clamp(cell, ivec3(0), systemUBO.gridRes-ivec3(1));
+   return cell;
+}
+
+int Index(ivec3 coord)
+{
+	return coord.x + systemUBO.gridRes.x*(coord.y + systemUBO.gridRes.y * coord.z);
+}
+
+layout(location = 0) uniform int uMode=1; 
+
+//Force field
+layout(location = 2) uniform float uFieldW = 0.0f;
+layout(location = 3) uniform int uFieldMode = 0;
+layout(location = 5) uniform vec4 uForcePos = vec4(0.0, 0.0, 0.0, 1.0); //x,y,z,r
+
+//Sphere projectile
+layout(location = 4) uniform vec4 uProj = vec4(0.0); //x,y,z,r
+
+
+
+const int MODE_UPDATE_V_AND_X = 0;
+const int MODE_CONSTRAINT_GRID = 1;
+
+void SolveConstraints(int ix);
+
+void UpdateVandX(int ix);
+void SolveConstraintsGrid(int ix);
+
+vec3 WallCollision(in XpbdParticle pi, vec4 plane, inout FrictionConstraint friction);
+
+
+void main()
+{
+	int gid = int(gl_GlobalInvocationID.x);
+	switch(uMode)
+	{
+		case MODE_UPDATE_V_AND_X:
+			UpdateVandX(gid);
+		break;
+		case MODE_CONSTRAINT_GRID:
+			SolveConstraintsGrid(gid);
+            //SolveConstraints(gid);
+		break;
+	}
+}
+
+
+vec3 div_free(vec3 x, vec3 y, vec3 c, float e)
+{
+	vec3 diff = x-y;
+	mat3 P = ((4.0*e-4.0*e*e*dot(diff,diff))*mat3(1.0) + 4.0*e*e*outerProduct(diff, diff))*exp(-e*dot(diff,diff));
+	return P*c;
+}
+
+
+//vec3 vel_field(vec3 p)
+//{
+//	p = p-uForcePos.xyz;
+//	float w = smoothstep(uForcePos.w+0.05, uForcePos.w-0.05, length(p));
+//
+//	//None
+//	if (uFieldMode == 0)
+//	{
+//		return vec3(0.0);
+//	}
+//
+//	//explode
+//	if(uFieldMode == 1)
+//	{
+//		vec3 v = p;
+//		v = 0.15*w*v/(length(v)+1.0e-6f);
+//		return v;
+//	}
+//
+//	//spin
+//	if (uFieldMode == 2)
+//	{
+//		vec3 v = p;
+//		v.y = 0.02;
+//		v.xz = vec2(-v.z, v.x);
+//		v.xz = 0.03 * v.xz / (length(v) + 1.0e-6f);
+//		v += -0.001*p/(length(p) + 1.0e-6f);
+//		v = w*v;
+//		return v;
+//	}
+//
+//	//split x
+//	if (uFieldMode == 3)
+//	{
+//		vec3 v = vec3(p.x, 0.0, 0.0);
+//		float w_mid = 0.4 * smoothstep(0.0, 0.2, abs(p.x));
+//		v = w * w_mid * v / (length(v) + 1.0e-6f);
+//		return v;
+//	}
+//
+//	//split y
+//	if (uFieldMode == 4)
+//	{
+//		vec3 v = vec3(0.0, p.y, 0.0);
+//		float w_mid = 0.4 * smoothstep(0.0, 0.2, abs(p.y));
+//		v = w * w_mid * v / (length(v) + 1.0e-6f);
+//		return v;
+//	}
+//
+//	//split z
+//	if (uFieldMode == 5)
+//	{
+//		vec3 v = vec3(0.0, 0.0, p.z);
+//		float w_mid = 0.4 * smoothstep(0.0, 0.2, abs(p.z));
+//		v = w * w_mid * v / (length(v) + 1.0e-6f);
+//		return v;
+//	}
+//
+//	const float vortex_e = 9.0;
+//	const vec3 vortex_y = vec3(0.0, 0.25, 0.0);
+//	const float vortex_speed = 0.05;
+//
+//	//vortex x
+//	if (uFieldMode == 6)
+//	{
+//		return w * vortex_speed * div_free(p, vortex_y, vec3(0.5, 0.0, 0.0), vortex_e);
+//	}
+//
+//	//vortex y
+//	if (uFieldMode == 7)
+//	{
+//		return w * vortex_speed * div_free(p, vortex_y, vec3(0.0, 0.5, 0.0), vortex_e);
+//	}
+//
+//	//vortex z
+//	if (uFieldMode == 8)
+//	{
+//		return w * vortex_speed * div_free(p, vortex_y, vec3(0.0, 0.0, 0.5), vortex_e);
+//	}
+//
+//	//turb
+//	if (uFieldMode == 9)
+//	{
+//		vec3 v = 0.005 * BitangentNoise4D(vec4(1.5 * p, SceneUniforms.Time));
+//		v.y += 0.02;
+//		v = w * v;
+//		return v;
+//	}
+//
+//	//shear
+//	if (uFieldMode == 10)
+//	{
+//		vec3 v = 0.2*w*(2.0*smoothstep(-0.05, 0.05, p.x)-1.0)*vec3(0.2, 1.0, 0.0);
+//		return v;
+//	}
+//
+//	//else
+//	return vec3(0.0);
+//}
+//
+//vec3 static_vel_field(vec3 p)
+//{
+//	//stretch x
+//	if (uFieldMode == 11)
+//	{
+//		vec3 v = vec3(sign(p.x), 0.0, 0.0);
+//		v = 0.3 * v;
+//		return v;
+//	}
+//	//stretch y
+//	if (uFieldMode == 12)
+//	{
+//		vec3 v = vec3(0.0, sign(p.y), 0.0);
+//		v = 0.3 * v;
+//		return v;
+//	}
+//	//twist x
+//	if (uFieldMode == 13)
+//	{
+//		vec3 v = p;
+//		v.x = 0.2 * sign(p.x);
+//		v.yz = 2.0*vec2(-v.z, v.y) * sign(p.x);
+//		return v;
+//	}
+//	//twist y
+//	if (uFieldMode == 14)
+//	{
+//		vec3 v = p;
+//		v.y = 0.2*sign(p.y);
+//		v.xz = -2.0*vec2(-v.z, v.x) * sign(p.y);
+//		return v;
+//	}
+//	return vec3(0.0);
+//}
+
+
+
+vec3 limit_len(vec3 v, float max_len)
+{
+	float len = length(v);
+	if(len>max_len)
+	{
+		v = max_len/len*v;
+	}
+	return v;
+}
+
+void UpdateVandX(int ix)
+{
+	if(ix >= systemUBO.numParticles) return;
+	XpbdParticle pi = particles_in[ix];
+	
+	float wi = GetW(pi);
+	pi.vel.xyz = systemUBO.c*(pi.xpos.xyz-pi.xprev.xyz)/systemUBO.dt; //update V
+	//update with dx from jacobi constraints
+	pi.vel.xyz = limit_len(pi.vel.xyz, GetRadius(pi)/systemUBO.dt);//limit velocity
+	//pi.xpos.xyz += pi.vel.xyz;
+
+	
+
+    // ????
+	//FrictionConstraint friction = mFriction[ix];
+    FrictionConstraint friction;
+	friction.mNormal = vec4(0.0);
+
+	//FrictionConstraint friction = mFriction[ix];
+	if (friction.mNormal.w > 0.0)//magnitude of normal force
+	{
+		vec3 vn = dot(friction.mNormal.xyz, pi.vel.xyz) * friction.mNormal.xyz;
+		vec3 vt = pi.vel.xyz - vn;
+		float mag_vt = length(vt) + 1e-8;
+		vec3 utan = vt / mag_vt;
+
+		//subtract friction from vt
+/*
+		float mu_d = 0.9;
+		vec3 friction_dv = mu_d * friction.mNormal.w * utan * systemUBO.dt;
+
+		//dynamic friction
+		if (length(friction_dv) > mag_vt)
+		{
+			vt = vec3(0.0);
+		}
+		else
+		{
+			vt -= friction_dv;
+		}
+*/
+		//damping
+		vt *= 0.990;
+
+		//static
+		const float mu_s = 0.05;
+		if (mag_vt < mu_s)
+		{
+			vt = vec3(0.0);
+		}
+		pi.vel.xyz = vn + vt;
+	}
+
+	//Apply gravity and other external forces
+	pi.xprev.xyz = pi.xpos.xyz;
+	if(wi > 0.0) 
+	{
+		pi.vel.xyz += systemUBO.g.xyz*systemUBO.dt;
+		//pi.vel.xyz += uFieldW*vel_field(pi.xpos.xyz);
+		pi.vel.xyz = limit_len(pi.vel.xyz, GetRadius(pi)/systemUBO.dt); //limit velocity
+		pi.xpos.xyz += pi.vel.xyz*systemUBO.dt;
+	}
+//static external forces
+if(wi == 0.0)
+{
+	//pi.xpos.xyz += uFieldW * static_vel_field(pi.xpos.xyz) * systemUBO.dt;
+	pi.xprev.xyz = pi.xpos.xyz;
+}
+
+	particles_out[ix] = pi;
+}
+
+
+void SolveConstraints(int ix)
+{
+	if(ix >= systemUBO.numParticles) return;
+	XpbdParticle pi = particles_in[ix];
+
+	//if (GetLod(pi) > 0) return;
+	vec3 dx = vec3(0.0);
+
+	//Initialize friction constraint
+	FrictionConstraint friction;
+	friction.mNormal = vec4(0.0);
+
+	float ri = GetRadius(pi);
+	float wi = GetW(pi);
+
+	//wall collisions
+	// const vec4 wall[6] = vec4[](vec4(+1.0, 0.0, 0.0, -1.0),
+	// 							vec4(-1.0, 0.0, 0.0, -1.0),
+	// 							vec4(0.0, +1.0, 0.0, -1.0),
+	// 							vec4(0.0, -1.0, 0.0, -1.0),
+	// 							vec4(0.0, 0.0, +1.0, -1.0),
+	// 							vec4(0.0, 0.0, -1.0, -1.0));
+    const vec4 wall[6] = systemUBO.wallConstraints;
+
+	//Environment constraints
+	for(int i=0; i<6; i++)
+	{
+		dx += WallCollision(pi, wall[i], friction);
+	}
+	
+	//Collision constraints
+	for(int jx=0; jx<systemUBO.numParticles; jx++)
+	{
+		if(jx==ix) continue; //no self-interactions
+		XpbdParticle pj = particles_in[jx];
+
+		float rj = GetRadius(pj);
+		float wj = GetW(pj);
+		vec3 nij = pi.xpos.xyz - pj.xpos.xyz;
+		float d = length(nij)+eps;
+		vec3 uij = nij/d;
+
+		if(d < ri + rj)
+		{
+			//separate
+			float h = 0.5f*(ri+rj-d);
+			dx += wi*systemUBO.omega_collision*h*uij/(wi+wj);
+		}
+	}
+
+	pi.xpos.xyz += dx;
+    //pi.xpos.xyz += vec3(0.01, 0.0, 0.0);
+	particles_out[ix] = pi;
+    // ????
+	//mFriction[ix] = friction;
+}
+
+
+vec4 sdgSegment(vec3 p, vec3 a, vec3 b, float r)
+{
+	vec3 ba = b - a;
+	vec3 pa = p - a;
+	float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+	vec3  q = pa - h * ba;
+	float d = length(q);
+	if(d<1e-6) q = a-b;
+	return vec4(d - r, q / (d+1e-12));
+}
+
+vec4 sdgSphere(vec3 p, vec3 cen, float r)
+{
+	vec3  q = p - cen;
+	float d = length(q);
+	return vec4(d - r, q / (d + 1e-12));
+}
+
+void SolveConstraintsGrid(int ix)
+{
+	if(ix >= systemUBO.numParticles) return;
+	XpbdParticle pi = particles_in[ix];
+	
+	vec3 dx = vec3(0.0);
+	//Initialize friction constraint
+	FrictionConstraint friction;
+	friction.mNormal = vec4(0.0);
+
+	float ri = GetRadius(pi);
+	float wi = GetW(pi);
+
+	//wall collisions
+	const vec4 wall[6] = systemUBO.wallConstraints;
+
+
+	//Environment constraints
+	for(int i=0; i<6; i++)
+	{
+		dx += WallCollision(pi, wall[i], friction);
+	}
+	
+	//get opposite diagonal of voxel
+	int base_index_ix = (ix/8)*8;		//base index of voxel
+	int local_ix = ix-base_index_ix;
+	int opposite_ix = (7-local_ix)+base_index_ix;
+	XpbdParticle pi_diag = particles_in[opposite_ix];
+	vec3 pi_cen = 0.5*(pi_diag.xpos.xyz + pi.xpos.xyz);
+
+	float box_hw = 2.0*ri;
+	aabb3D query_aabb = aabb3D(vec4(pi.xpos.xyz-vec3(box_hw), 0.0), vec4(pi.xpos.xyz+vec3(box_hw), 0.0));
+	//These are the cells the query overlaps
+	ivec3 cell_min = CellCoord(query_aabb.mMin.xyz);
+	ivec3 cell_max = CellCoord(query_aabb.mMax.xyz);
+
+	//Collision constraints
+	for(int i=cell_min.x; i<=cell_max.x; i++)
+	{
+		for(int j=cell_min.y; j<=cell_max.y; j++)
+		{
+			for(int k=cell_min.z; k<=cell_max.z; k++)
+			{
+				int cell = Index(ivec3(i,j,k));
+				int start = mStart[cell];
+				int count = mCount[cell];
+
+				for(int list_index = start; list_index<start+count; list_index++)
+				{
+					int jx = mContent[list_index];
+
+					//if(jx/8==ix/8) continue; //no self-interactions
+					if (jx == ix) continue;
+
+					XpbdParticle pj = particles_in[jx];
+
+					float rj = GetRadius(pj);
+					float wj = GetW(pj);
+
+			
+
+					vec3 nij = pi.xpos.xyz - pj.xpos.xyz;
+					float d = length(nij) + eps;
+					vec3 uij = nij / d; //actual sphere normal
+					
+					
+//*/
+					float pen = ri + rj - d; //convention: penetration is positive when there is a collision
+					if (d < ri + rj)
+					{
+						float h = 0.5f*(ri+rj-d);
+						dx += wi*systemUBO.omega_collision*h*uij/(wi+wj);
+
+						
+					}
+				}
+			}
+		}
+	}
+	
+	if(wi>0.0)
+	{
+		pi.xpos.xyz += dx;
+	}
+
+	particles_out[ix] = pi;
+	//mFriction[ix] = friction;
+}
+
+
+vec3 WallCollision(in XpbdParticle pi, vec4 plane, inout FrictionConstraint friction)
+{
+	float ri = GetRadius(pi);
+	float wi = GetW(pi);
+	float d = dot(pi.xpos.xyz, plane.xyz) - plane.w;
+
+	float pen = ri - d; //convention: penetration is positive when there is a collision
+	if (pen < 0.0 || wi == 0.0) return vec3(0.0);
+
+	//clamp position
+	vec3 uij = plane.xyz; //unit vector
+	vec3 dx = systemUBO.omega_collision * pen * uij; //move in normal direction
+
+	if (pen > friction.mNormal.w)//save friction from max penetration
+	{
+		friction.mNormal = vec4(uij, pen);
+	}
+	return dx;
+}
+
+
+float maxcomp(vec3 v)
+{
+	return max(v.x, max(v.y, v.z));
+}
+
+vec3 msign(vec3 v)
+{
+	return vec3(sign(v.x), sign(v.y), sign(v.z));
+}
+

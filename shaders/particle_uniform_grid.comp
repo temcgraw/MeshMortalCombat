@@ -1,0 +1,147 @@
+#version 460
+
+#ifndef LOCAL_SIZE_COMMON
+#define LOCAL_SIZE_COMMON 1024
+#endif
+
+struct aabb3D
+{
+    vec4 mMin;
+    vec4 mMax;
+};
+
+bool overlap(aabb3D a, aabb3D b)
+{
+   
+    //if(any(lessThanEqual(a.mMax.xyz, b.mMin.xyz))) {return false;}
+    //if(any(lessThanEqual(b.mMax.xyz, a.mMin.xyz))) {return false;}
+    //return true;
+
+    if(a.mMax.x < b.mMin.x || b.mMax.x < a.mMin.x) {return false;}
+    if(a.mMax.y < b.mMin.y || b.mMax.y < a.mMin.y) {return false;}
+    if(a.mMax.z < b.mMin.z || b.mMax.z < a.mMin.z) {return false;}
+    return true;
+}
+
+//XpbdParticles
+struct Particle
+{
+   vec4 pos;
+   vec4 vel;    
+   vec4 acc;  
+   uvec4 flags;
+};
+
+layout(local_size_x = LOCAL_SIZE_COMMON) in;
+
+const int kGridUboBinding = 1;
+const int kPointsInBinding = 2;
+const int kPointsOutBinding = 3;
+const int kCountBinding = 4;
+const int kStartBinding = 5;
+const int kContentBinding = 6;
+
+
+//Modes
+const int COMPUTE_COUNT = 0;
+const int COMPUTE_START = 1;
+const int INSERT_POINTS = 2;
+
+layout(location=0) uniform int uMode = COMPUTE_COUNT;
+
+layout (std430, binding = kCountBinding) restrict buffer COUNTER 
+{
+	int mCount[];
+};
+
+layout (std430, binding = kStartBinding) restrict buffer START 
+{
+	int mStart[];
+};
+
+layout (std430, binding = kContentBinding) restrict buffer CONTENT
+{
+	int mContent[];
+};
+
+
+layout (std140, binding = kGridUboBinding) uniform DESTRUCTIVE_SYSTEM_DATA
+{
+    int numParticles;
+    int numCells;
+    vec3 gridMin;
+    vec3 gridMax;
+    ivec3 gridRes;
+    vec3 cellSize;
+    int maxCellsPerElement;
+    vec4 wallConstraints[6];
+    vec4 g;
+    float dt;
+    float c;
+    float omega_collision; // collision stiffness
+} systemUBO;
+
+ivec3 CellCoord(vec3 p)
+{
+   p = p-systemUBO.gridMin;
+   ivec3 cell = ivec3(floor(p/systemUBO.cellSize));
+   cell = clamp(cell, ivec3(0), systemUBO.gridRes-ivec3(1));
+   return cell;
+}
+
+int Index(ivec3 coord)
+{
+	return coord.x + systemUBO.gridRes.x*(coord.y + systemUBO.gridRes.y * coord.z);
+}
+
+ivec2 ContentRange(ivec3 cell)
+{
+	int cell1 = Index(cell);
+	int start = mStart[cell1];
+	int count = mCount[cell1];
+	return ivec2(start, start+count-1);
+}
+
+
+layout (std430, binding = kPointsInBinding) readonly restrict buffer IN 
+{
+	Particle mParticles[];
+};
+
+
+
+void ComputeCount(int gid);
+void InsertPoint(int gid);
+
+void main()
+{
+	int gid = int(gl_GlobalInvocationID.x);
+	if(gid >= systemUBO.numParticles) return;
+	//if(point_in_aabb(mParticles[gid].pos.xy, mExtents)==false) return;
+
+	if(uMode==COMPUTE_COUNT)
+	{
+		ComputeCount(gid);	
+	}
+	else if(uMode==INSERT_POINTS)
+	{
+		InsertPoint(gid);
+	}
+}
+
+void ComputeCount(int gid)
+{
+	//particle is a point and only belongs to a single cell
+	ivec3 cell = CellCoord(mParticles[gid].pos.xyz);
+	int ix = Index(cell);
+	atomicAdd(mCount[ix], 1);
+}
+
+void InsertPoint(int gid)
+{
+	ivec3 cell = CellCoord(mParticles[gid].pos.xyz);
+	int ix = Index(cell);
+	int start = mStart[ix];
+	int count = atomicAdd(mCount[ix], 1);
+	mContent[start+count] = gid;
+}

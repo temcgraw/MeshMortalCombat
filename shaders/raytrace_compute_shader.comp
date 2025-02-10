@@ -1,0 +1,622 @@
+#version 430 core
+
+layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+uniform vec3 cameraPos;
+uniform vec3 cameraFront; 
+uniform vec3 cameraUp; 
+uniform float fov; // in degrees
+uniform float aspectRatio; 
+uniform int imageWidth;
+uniform int imageHeight;
+uniform bool hasSkybox;
+uniform int primitiveCount;
+uniform int maxDepth;
+
+uniform int frameCounter; // from 1 to inf
+uniform float time;
+
+uniform samplerCube skyboxTexture;
+uniform samplerBuffer primitives; // primitive buffer, contains all the model data (triangles and spheres) GL_TEXTURE0 
+uniform samplerBuffer TLAS; // top level acceleration structure buffer, containing BVH nodes for mesh instances, GL_TEXTURE2
+uniform samplerBuffer BLAS; // bottom level acceleration structure buffer, containing BVH nodes for triangles, GL_TEXTURE3
+
+uniform sampler2DArray sceneTextures; // texture sampler, it contains all the textures needed for the scene, GL_TEXTURE4
+
+// we must define them as MACRO
+// otherwise, the GLSL compiler will not allow us to use them for sampling TBO
+// I don't know why, but it's the truth
+#define PRIMITIVE_LENGTH 9 // 9 * vec3
+#define TLAS_NODE_LENGTH 8 // 8 * vec4
+#define BLAS_NODE_LENGTH 3 // 3 * vec4
+// calculation mathmatical constants
+#define PI 3.14159265359
+#define EPSILON 0.0000001
+
+// the image texture to read and write the final color
+layout(binding = 2, rgba32f) uniform image2D outputImage;
+
+
+
+// Please refer to this repository:
+// https://github.com/AKGWSB/EzRT
+// ----------------------------------------------------------------------------- //
+/*
+ * generate random number, the seed is from the global invocation ID and frame counter
+ * code src：https://blog.demofox.org/2020/05/25/casual-shadertoy-path-tracing-1-basic-camera-diffuse-emissive/
+*/
+uint seed = uint
+            (
+                uint((gl_GlobalInvocationID.x * 0.5 + 0.5) * imageWidth)  * uint(1973) + 
+                uint((gl_GlobalInvocationID.y * 0.5 + 0.5) * imageHeight) * uint(9277) + 
+                uint(frameCounter) * uint(26699)
+            ) 
+            | 
+            uint(1);
+
+uint wang_hash(inout uint seed) {
+    seed = uint(seed ^ uint(61)) ^ uint(seed >> uint(16));
+    seed *= uint(9);
+    seed = seed ^ (seed >> 4);
+    seed *= uint(0x27d4eb2d);
+    seed = seed ^ (seed >> 15);
+    return seed;
+}
+float rand() {
+    return float(wang_hash(seed)) / 4294967296.0;
+}
+// ----------------------------------------------------------------------------- //
+// bad implementation of random vector generation:  'while (true)' rejection sampling is not efficient for GPU
+// vec3 vec3_rand(float _min, float _max) {
+//     return vec3(rand() * (_max - _min) + _min, rand() * (_max - _min) + _min, rand() * (_max - _min) + _min);
+// }
+// vec3 sampleInUnitSphere() {
+//     while (true) {
+//         vec3 p = vec3_rand(-1.0, 1.0);
+//         if (length(p) < 1.0) {
+//             return p;
+//         }
+//     }
+// }
+// vec3 randomUnitSphereVec() {
+//     return normalize(sampleInUnitSphere());
+// }
+// ----------------------------------------------------------------------------- //
+vec3 randomUnitVector() {
+    float z = 2.0 * rand() - 1.0; // rand value from -1 to 1
+    float a = 2.0 * PI * rand(); // rand angle from 0 to 2PI, representing the azimuthal angle φ
+    float r = sqrt(1.0 - z * z); // the radius projection on the xy plane
+    float x = r * cos(a); // the x component
+    float y = r * sin(a); // the y component
+    return vec3(x, y, z); // it's a unit vector in the sphere
+}
+// ----------------------------------------------------------------------------- //
+
+
+
+
+int getPrimitiveType(int index) {// 0 for triangle, 1 for sphere
+    return int(texelFetch(primitives, index * PRIMITIVE_LENGTH).x);
+}
+
+struct Sphere {
+    vec3 center;
+    float radius;
+};
+
+struct Triangle {
+    vec3 v0;
+    vec3 v1;
+    vec3 v2;
+    vec3 n0;
+    vec3 n1;
+    vec3 n2;
+    vec2 t0;
+    vec2 t1;
+    vec2 t2;
+};
+
+Sphere getSphere(int index) {
+    Sphere sphere;
+    vec4 tmp;
+    tmp = texelFetch(primitives, index * PRIMITIVE_LENGTH);
+    sphere.center = texelFetch(primitives, index * PRIMITIVE_LENGTH + 1).xyz;
+    sphere.radius = texelFetch(primitives, index * PRIMITIVE_LENGTH + 2).x;
+    return sphere;
+}
+
+Triangle getTriangle(int index) {
+    Triangle triangle;
+    vec4 tmp1, tmp2;
+    triangle.v0 = texelFetch(primitives, index * PRIMITIVE_LENGTH + 1).xyz;
+    triangle.v1 = texelFetch(primitives, index * PRIMITIVE_LENGTH + 2).xyz;
+    triangle.v2 = texelFetch(primitives, index * PRIMITIVE_LENGTH + 3).xyz;
+    triangle.n0 = texelFetch(primitives, index * PRIMITIVE_LENGTH + 4).xyz;
+    triangle.n1 = texelFetch(primitives, index * PRIMITIVE_LENGTH + 5).xyz;
+    triangle.n2 = texelFetch(primitives, index * PRIMITIVE_LENGTH + 6).xyz;
+    tmp1 = texelFetch(primitives, index * PRIMITIVE_LENGTH + 7);
+    tmp2 = texelFetch(primitives, index * PRIMITIVE_LENGTH + 8);
+    triangle.t0 = tmp1.xy;
+    triangle.t1 = vec2(tmp1.z, tmp2.x);
+    triangle.t2 = tmp2.yz;
+    return triangle;
+}
+
+struct Ray {
+    vec3 origin;
+    vec3 direction;
+};
+
+struct HitRecord {
+    vec3 p;
+    vec3 normal;
+    float t;
+    bool frontFace;
+    vec3 color;
+    int materialType;
+    // fuzziness for metal material, indexOfRefraction for dielectric material
+    float fuzzOrIOR;
+    float u, v;
+};
+
+struct BLASNode{
+    int left;
+    int right;
+    int n; // number of primitives in the node
+    int primitiveIndex; // the index of the first primitive in the node
+    vec3 AA, BB;
+};
+
+struct TLASNode{
+    int left; // -1 if the node is a leaf
+    int right; // -1 if the node is a leaf
+    int BLASIndex; // if the node is a leaf, this is the index of the BLAS node, otherwise, it is -1
+    int materialType; // if the node is a leaf, this is the material type, otherwise, it is -1
+    int textureIndex; // if the node is a leaf and it has texture, this is the index of the texture, otherwise, it is -1
+    vec3 baseColor; // if the node is a leaf, this is the base color, otherwise, it is (0, 0, 0)
+    float fuzzOrIOR; // if the node is a leaf, this is the fuzziness of the metal material or the index of refraction of the dielectric material, otherwise, it is -1
+    vec3 AA, BB; // the axis-aligned bounding box of the node in the world space
+    mat4 transform; // if the node is a leaf, this is the transformation matrix, otherwise, it is the identity matrix
+};
+
+// I didn't use these quat utilities in this shader, but I will keep them here for future use
+// -----------------------------------------------------------------------------------------------//
+vec4 normalizeQuat(vec4 q) {
+    return q / length(q);
+}
+vec4 quatInverse(vec4 q) {
+    q = normalizeQuat(q);
+    return vec4(q.w, -q.x, -q.y, -q.z);
+}
+vec4 quatMul(vec4 q1, vec4 q2) {
+    return vec4(
+        q1.w*q2.x + q1.x*q2.w + q1.y*q2.z - q1.z*q2.y,
+        q1.w*q2.y - q1.x*q2.z + q1.y*q2.w + q1.z*q2.x,
+        q1.w*q2.z + q1.x*q2.y - q1.y*q2.x + q1.z*q2.w,
+        q1.w*q2.w - q1.x*q2.x - q1.y*q2.y - q1.z*q2.z
+    );
+}
+vec3 rotatePointByQuat(vec3 p, vec4 q) {
+    vec4 pQuat = vec4(0.0, p.x, p.y, p.z);
+    vec4 qInv = quatInverse(q);
+    vec4 pRotatedQuat = quatMul(quatMul(q, pQuat), qInv);
+    return pRotatedQuat.yzw; // 仅返回向量部分
+}
+// -----------------------------------------------------------------------------------------------//
+
+// ray-sphere intersection
+bool hitSphere(Sphere sphere, Ray ray, float tMin, float tMax, inout HitRecord hitRecord) {
+    vec3 oc = ray.origin - sphere.center;
+    float a = dot(ray.direction, ray.direction);
+    float b = 2.0 * dot(oc, ray.direction);
+    float c = dot(oc, oc) - sphere.radius * sphere.radius;
+    float discriminant = b * b - 4.0 * a * c;
+    if (discriminant > 0.0) {
+        float temp = (-b - sqrt(discriminant)) / (2.0 * a);
+        if (temp > tMax || temp < tMin) {
+            temp = (-b + sqrt(discriminant)) / (2.0 * a);
+            }
+        if (temp > tMax || temp < tMin) {
+            return false;
+        }
+        hitRecord.t = temp;
+        hitRecord.p = ray.origin + temp * ray.direction;
+        hitRecord.normal = normalize(hitRecord.p - sphere.center);
+        hitRecord.color = vec3(0.0); // we have let TLAS node to store the color and material type, so primitive does not need to record them
+        hitRecord.materialType = 0; // TLAS will record the material type
+        hitRecord.fuzzOrIOR = 0.0; // TLAS will record the fuzziness or index of refraction
+        hitRecord.frontFace = dot(ray.direction, hitRecord.normal) < 0.0;
+        if (!hitRecord.frontFace) {
+            hitRecord.normal = -hitRecord.normal;
+        }
+        // the u and v are calculated by the hit point's spherical coordinates
+        vec3 hitPointObjectSpace = normalize(hitRecord.p - sphere.center);
+        float theta = acos(hitPointObjectSpace.y);
+        float phi = atan(-hitPointObjectSpace.z, -hitPointObjectSpace.x) + PI;
+        hitRecord.u = phi / (2.0 * PI);
+        hitRecord.v = theta / PI;
+        
+        return true;
+    }
+    return false;
+}
+
+// ray-triangle intersection
+// Möller-Trumbore: https://blog.csdn.net/zhanxi1992/article/details/109903792
+bool hitTriangle(Triangle triangle, Ray ray, float tMin, float tMax, inout HitRecord hitRecord) {
+    vec3 E1, E2, S1, S, S2, origin, D;
+    float S1E1, inv_S1E1, b1, b2, t;
+    origin = ray.origin;
+    D = ray.direction;
+    E1 = triangle.v1 - triangle.v0;
+    E2 = triangle.v2 - triangle.v0;
+    S1 = cross(D, E2);
+    S1E1 = dot(S1, E1); 
+    if (S1E1 > -EPSILON && S1E1 < EPSILON) {
+        return false;
+    }
+    inv_S1E1 = 1.0 / S1E1;
+    S = origin - triangle.v0;
+    b1 = dot(S, S1) * inv_S1E1;
+    if (b1 < 0.0 || b1 > 1.0) {
+        return false;
+    }
+    S2 = cross(S, E1);
+    b2 = dot(D, S2) * inv_S1E1;
+    if (b2 < 0.0 || b1 + b2 > 1.0) {
+        return false;
+    }
+    t = dot(E2, S2) * inv_S1E1;
+    if (t < tMin || t > tMax) {
+        return false;
+    }
+    vec3 normal;
+    if (triangle.n0 == vec3(0.0)) {// if the normal is not provided, we will use face normal
+        normal = normalize(cross(E1, E2));
+    } else {
+        float b0 = 1.0 - b1 - b2;
+        normal = normalize(b0 * triangle.n0 + b1 * triangle.n1 + b2 * triangle.n2);
+    }
+    //if (dot(ray.direction, normal) >= 0.0) {
+    //    return false;// enable this line to disable back face (back face culling)
+    //}
+
+
+    hitRecord.t = t;
+    hitRecord.p = ray.origin + t * ray.direction;
+    hitRecord.normal = normal;
+    hitRecord.color = vec3(0.0); // we have let TLAS node to store the color and material type, so primitive does not need to record them
+    hitRecord.materialType = 0; // TLAS will record the material type
+    hitRecord.fuzzOrIOR = 0.0; // TLAS will record the fuzziness or index of refraction
+    hitRecord.frontFace = dot(ray.direction, hitRecord.normal) < 0.0;
+    if (!hitRecord.frontFace) {
+        hitRecord.normal = -hitRecord.normal;
+    }
+    
+    float b0 = 1.0 - b1 - b2;
+    vec2 uv = b0 * triangle.t0 + b1 * triangle.t1 + b2 * triangle.t2;
+    hitRecord.u = uv.x;
+    hitRecord.v = uv.y;
+    
+    return true;
+}
+
+// get intersection point of ray and AABB (in t, if not intersect, return -1)
+bool hitAABB(Ray r, vec3 AA, vec3 BB, float tMin, float tMax) {
+    vec3 invdir = 1.0 / r.direction;
+
+    vec3 f = (BB - r.origin) * invdir;
+    vec3 n = (AA - r.origin) * invdir;
+
+    vec3 tmax = max(f, n);
+    vec3 tmin = min(f, n);
+
+    float t1 = min(tmax.x, min(tmax.y, tmax.z));
+    float t0 = max(tmin.x, max(tmin.y, tmin.z));
+
+    tMin = max(t0, tMin);
+    tMax = min(t1, tMax);
+
+    if (tMax < tMin) {
+        return false;
+    }
+
+    return true;
+
+}
+
+// hit the primitive array, the primitives to check should be sequential in the array from l to r
+// this is ensured by CPU's BVH construction which will sort the primitives
+bool hitPrimitiveArray(Ray ray, int l, int r, float tMin, float tMax, inout HitRecord hitRecord){
+    bool hit = false;
+    for (int i = l; i <= r; i++) {
+        int primitiveType = getPrimitiveType(i);
+        if (primitiveType == 0) {
+            Triangle triangle = getTriangle(i);
+            if (hitTriangle(triangle, ray, tMin, tMax, hitRecord)) {
+                tMax = hitRecord.t;
+                hit = true;
+            }
+        } 
+        else if (primitiveType == 1) {
+            Sphere sphere = getSphere(i);
+            if (hitSphere(sphere, ray, tMin, tMax, hitRecord)) {
+                tMax = hitRecord.t;
+                hit = true;
+            }
+        }
+
+    }
+    
+    return hit;
+}
+
+// transform the ray from world space to model space
+Ray rayWorldToModel(Ray ray, mat4 modelMatrix) {
+    // first get the inverse of the model matrix
+    mat4 invModelMatrix = inverse(modelMatrix);
+    Ray rayModelSpace;
+    rayModelSpace.origin = (invModelMatrix * vec4(ray.origin, 1.0)).xyz;
+    rayModelSpace.direction = (invModelMatrix * vec4(ray.direction, 0.0)).xyz;
+    return rayModelSpace;
+}
+
+// transform the point from model space to world space
+vec3 pointModelToWorld(vec3 point, mat4 modelMatrix) {
+    vec3 pointWorldSpace = (modelMatrix * vec4(point, 1.0)).xyz;
+    return pointWorldSpace;
+}
+
+// transform the normal from model space to world space
+vec3 normalModelToWorld(vec3 normal, mat4 modelMatrix) {
+    // the normal should be transformed by the inverse transpose of the model matrix
+    // since the model matrix may contain non-uniform scaling
+    mat4 invTranspose = transpose(inverse(modelMatrix));
+    vec3 normalWorldSpace = normalize((invTranspose * vec4(normal, 0.0)).xyz);
+    return normalWorldSpace;
+}
+
+BLASNode getBLASNode(int index) {
+    BLASNode node;
+    vec4 tmp = texelFetch(BLAS, index * BLAS_NODE_LENGTH);
+    node.left = int(tmp.x);
+    node.right = int(tmp.y);
+    node.n = int(tmp.z);
+    node.primitiveIndex = int(tmp.w);
+    node.AA = texelFetch(BLAS, index * BLAS_NODE_LENGTH + 1).xyz;
+    node.BB = texelFetch(BLAS, index * BLAS_NODE_LENGTH + 2).xyz;
+    return node;
+}
+
+TLASNode getTLASNode(int index) {
+    TLASNode node;
+    vec4 tmp = texelFetch(TLAS, index * TLAS_NODE_LENGTH);
+    node.left = int(tmp.x);
+    node.right = int(tmp.y);
+    node.BLASIndex = int(tmp.z);
+    node.materialType = int(tmp.w);
+    tmp = texelFetch(TLAS, index * TLAS_NODE_LENGTH + 1);
+    node.textureIndex = int(tmp.x);
+    node.baseColor = tmp.yzw;
+    tmp = texelFetch(TLAS, index * TLAS_NODE_LENGTH + 2);
+    node.fuzzOrIOR = tmp.x;
+    node.AA = tmp.yzw;
+    node.BB = texelFetch(TLAS, index * TLAS_NODE_LENGTH + 3).xyz;
+    node.transform = mat4(
+        texelFetch(TLAS, index * TLAS_NODE_LENGTH + 4).xyzw,
+        texelFetch(TLAS, index * TLAS_NODE_LENGTH + 5).xyzw,
+        texelFetch(TLAS, index * TLAS_NODE_LENGTH + 6).xyzw,
+        texelFetch(TLAS, index * TLAS_NODE_LENGTH + 7).xyzw
+    );
+
+    return node;
+}
+
+// calculate the reflectance based on Schlick's approximation
+float reflectance(float cosine, float refIdx) {
+    float r0 = (1.0 - refIdx) / (1.0 + refIdx);
+    r0 = r0 * r0;
+    return r0 + (1.0 - r0) * pow((1.0 - cosine), 5.0);
+}
+
+bool hitBLAS(Ray ray, float tMin, float tMax, inout HitRecord hitRecord, int BLASIndex) {
+    BLASNode node;
+    bool hit = false;
+    // starting from the root node of the BLAS,
+    int stack[1000];
+    int stackTop = 0;
+    stack[stackTop++] = BLASIndex;// push the root node inside the stack
+    while (stackTop > 0) {
+        int nodeIndex = stack[--stackTop];
+        node = getBLASNode(nodeIndex);
+        if (node.n != 0) { // leaf node
+            if (hitPrimitiveArray(ray, node.primitiveIndex, node.primitiveIndex + node.n - 1, tMin, tMax, hitRecord)) {
+                tMax = hitRecord.t;
+                hit = true;
+            }
+        } 
+        else {
+            // we will check the AABB of the node first
+            bool hit_AABB = hitAABB(ray, node.AA, node.BB, tMin, tMax);
+            if (hit_AABB) {
+                // if the AABB is hit, we will push the children nodes into the stack
+                if (node.left != -1) {
+                    stack[stackTop++] = node.left;
+                }
+                if (node.right != -1) {
+                    stack[stackTop++] = node.right;
+                }
+            }
+        }
+    }
+    
+    return hit;
+}
+
+bool hitTLAS(Ray ray, float tMin, float tMax, inout HitRecord hitRecord) {
+    TLASNode node;
+    bool hit = false;
+    // starting from the root node of the TLAS,
+    // we will traverse the TLAS in leaf node searching
+    // since the TLAS is a binary tree, we will use a stack to store the nodes (non-recursive since it's GLSL not C++)
+    int stack[100];
+    int stackTop = 0;
+    stack[stackTop++] = 0;// push the root node inside the stack
+    while (stackTop > 0) {
+        int nodeIndex = stack[--stackTop];
+        node = getTLASNode(nodeIndex);
+        if (node.BLASIndex != -1) { // leaf node
+            // if the node is a leaf, we will check the BLAS node for intersection
+            // keep the hit record if the intersection is closer
+            // so in the end, the hitRecord will contain the closest intersection
+            // the TLAS leaf node contains the model transformation matrix for the BLAS object
+            // we will apply the inverse transformation to the ray to transform the ray into the object space
+            Ray rayObjectSpace = rayWorldToModel(ray, node.transform);
+            if (hitBLAS(rayObjectSpace, tMin, tMax, hitRecord, node.BLASIndex)) {
+                tMax = hitRecord.t;
+                hit = true;
+                // remember to transform the normal and hit point back to the world space
+                hitRecord.p = pointModelToWorld(hitRecord.p, node.transform);
+                hitRecord.normal = normalModelToWorld(hitRecord.normal, node.transform);
+
+                // CAUTION: I assume all primitives in the same TLAS leaf node have the same material, so we will use the material of the node
+                hitRecord.materialType = node.materialType;
+                hitRecord.color = node.baseColor;
+                // if have texture, we will use the texture color * base color
+                if (node.textureIndex != -1) {
+                    vec2 uv = vec2(hitRecord.u, hitRecord.v);
+                    vec3 textureColor = texture(sceneTextures, vec3(uv, node.textureIndex)).rgb;
+                    hitRecord.color *= textureColor;
+                }
+
+                hitRecord.fuzzOrIOR = node.fuzzOrIOR;
+            }
+        } 
+        else {
+            // we will check the AABB of the node first
+            bool hit_AABB = hitAABB(ray, node.AA, node.BB, tMin, tMax);
+            if (hit_AABB) {
+                // if the AABB is hit, we will push the children nodes into the stack
+                if (node.left != -1) {
+                    stack[stackTop++] = node.left;
+                }
+                if (node.right != -1) {
+                    stack[stackTop++] = node.right;
+                }
+            }
+        }
+    }
+
+    return hit;
+}
+
+// path tracing, return the color of the pixel sampled by the Monte Carlo path tracing
+// forget about PBR and BRDF for now, let's just use Lambertian Reflection aka Perfect Diffuse Reflection
+vec3 rayColor(Ray ray, int maxBounce){
+    vec3 color = vec3(0.0);
+    vec3 attenuation = vec3(1.0);
+    for (int i = 0; i < maxBounce; i++) {
+        HitRecord hitRecord;
+        if (hitTLAS(ray, 0.001, 10000.0, hitRecord)) {
+            vec3 hitPos = hitRecord.p;
+            vec3 normal = hitRecord.normal;
+            // do scattering according to the material
+            if (hitRecord.materialType == 0) {
+                // Lambertian Reflection
+                vec3 target = hitPos + normal + randomUnitVector();
+                ray.origin = hitPos;
+                ray.direction = target - hitPos;
+                attenuation *= hitRecord.color;
+            } 
+            else if (hitRecord.materialType == 1) {
+                // Metal
+                vec3 reflected = reflect(normalize(ray.direction), normal);
+                ray.origin = hitPos;
+                ray.direction = reflected + hitRecord.fuzzOrIOR * randomUnitVector();
+                attenuation *= hitRecord.color;
+            } 
+            else if (hitRecord.materialType == 2) {
+                // Dielectric
+                float refractionRatio = hitRecord.frontFace ? (1.0 / hitRecord.fuzzOrIOR) : hitRecord.fuzzOrIOR;
+                vec3 unitDirection = normalize(ray.direction);
+                float cosTheta = min(dot(-unitDirection, normal), 1.0);
+                float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+                bool cannotRefract = refractionRatio * sinTheta > 1.0;
+                vec3 direction;
+                if (cannotRefract || reflectance(cosTheta, refractionRatio) > rand()) {
+                    direction = reflect(unitDirection, normal);
+                } else {
+                    direction = refract(unitDirection, normal, refractionRatio);
+                }
+                ray.origin = hitPos;
+                ray.direction = direction;
+
+            }
+            // if the hitRecord is a light source, we will add the light source color to the pixel color
+            else if (hitRecord.materialType == 3) {
+                // Light Source
+                color += attenuation * hitRecord.color;
+                // we will break the loop since we assume the light source is the last bounce
+                break;
+            }
+            else {
+                // show a red color if the material type is not recognized
+                attenuation = vec3(1.0, 0.0, 0.0);
+            }
+        } 
+        else {
+            if (hasSkybox) {
+                color += attenuation * texture(skyboxTexture, ray.direction).rgb;
+            }
+            else{
+                vec3 unitDirection = normalize(ray.direction);
+                float t = 0.5 * (unitDirection.y + 1.0);
+                color += (1.0 - t) * vec3(1.0) + t * vec3(0.5, 0.7, 1.0);
+            }
+            break;
+        }
+    }
+
+
+    return color;
+
+}
+
+void main() {
+    // get the pixel coordinate
+    ivec2 texCoord = ivec2(gl_GlobalInvocationID.xy);
+    // check if the pixel coordinate is out of the image, if so, the thread will exit
+    if (texCoord.x >= imageWidth || texCoord.y >= imageHeight) {
+        return;
+    }
+    // change the coordinate system to NDC
+    // actual pixel coordinate needs to be added by 0.5 because the texel center is at (0.5, 0.5)
+    vec2 ndcCoord = (2.0 * (vec2(texCoord) + vec2(0.5)) - vec2(imageWidth, imageHeight)) / vec2(imageWidth, imageHeight);
+    ndcCoord.y *= -1.0; // in NDC, y is from bottom to top, while in image, y is from top to bottom
+
+    // compute the ray direction via the camera parameters
+    float tanFov = tan(radians(fov) / 2.0);
+    // add random offset to the ray direction to enable anti-aliasing
+    vec2 pixelSample = vec2((rand()-0.5)/float(imageWidth), (rand()-0.5)/float(imageHeight));
+    pixelSample *= 2;
+    vec2 sampledCoord = vec2(ndcCoord.x + pixelSample.x, ndcCoord.y + pixelSample.y);
+    vec3 rayDir = normalize(cameraFront + tanFov * sampledCoord.x * aspectRatio * cross(cameraFront, cameraUp) + tanFov * sampledCoord.y * cameraUp);
+
+    // ray tracing
+    vec3 color;
+
+    Ray ray;
+    ray.origin = cameraPos;
+    ray.direction = rayDir;
+    HitRecord hitRecord;
+
+    color = rayColor(ray, maxDepth);
+
+    
+    // mix the color with the last frame (temporal denoising)
+    vec3 lastColor = imageLoad(outputImage, texCoord).rgb;
+    color = mix(lastColor, color, 1.0/float(frameCounter));
+
+    imageStore(outputImage, texCoord, vec4(color, 1.0));
+    return;
+}
