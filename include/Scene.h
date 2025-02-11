@@ -18,7 +18,9 @@
 
 enum SceneName {
     SCENE1 = 0,
-    SCENE2 = 1
+    SCENE2 = 1,
+    SCENE3 = 2,
+    SCENE4 = 3,
 };
 
 

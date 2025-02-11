@@ -618,6 +618,7 @@ public:
             std::cout<<"ERROR: [DestructiveRenderComponent] compute component is expired"<<std::endl;
             return;
         }
+        // --------------------particle rendering--------------------------------
         // render the particles
         particleShader->use();
 		glBindVertexArray(particle_VAO);
@@ -641,9 +642,20 @@ public:
         debugShader->setVec4("lineColor", glm::vec4(0.3, 1, 1, 1));
         glDrawArrays(GL_LINES, 0, 24);
         glBindVertexArray(0);
+        // -------------------------------------------------------------------
+        // --------------------voxel rendering--------------------------------
 
 
-        if(targetMesh != nullptr){
+
+
+
+        // -------------------------------------------------------------------
+
+
+
+
+        // --------------------original mesh rendering------------------------
+        if(targetMesh != nullptr && brenderOriginalMesh){
             // render the target mesh
             // TODO: get rid of uniform context but use ubo context instead
             // if (context != nullptr) {
@@ -651,7 +663,7 @@ public:
             // }
             targetMesh->draw();
         }
-
+        // -------------------------------------------------------------------
     }
     void bindComputeComponent(std::shared_ptr<DestructiveCSComponent> _computeComponent) {
         this->computeComponent = _computeComponent;
@@ -674,7 +686,7 @@ private:
     // also a debug shader to render the AABB stuff ... maybe not necessary
     Shader * debugShader;
     GMVPObject * targetMesh;
-
+    bool brenderOriginalMesh = true;
     // though we don't need any VBO or EBO for debug rendering, I found it is necessary to create a VAO
     // otherwise, the draw call will be automatically ignored by the OpenGL...
     GLuint debug_VAO; 
@@ -849,6 +861,46 @@ protected:
     vector3d<float> mVoxels;
 };
 
+
+
+#include "UIManager.h"
+// the UI for such system, I put it here
+class DestructiveCSUI_left : public UIWindow {
+public:
+    DestructiveCSUI_left() {
+
+    }
+    void drawWindow() override {
+        if (!display) return;
+        const char* sceneNames[] = { "SCENE1", "SCENE2", "SCENE3", "SCENE4" };
+        ImGui::SetNextWindowPos(ImVec2(5, 10), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(340, ImGui::GetIO().DisplaySize.y-20), ImGuiCond_Always);
+        if (ImGui::Begin("DestructiveSystem", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize)) {
+			ImGui::Text("XXX");
+            if (ImGui::Button("Reinitialize Scene")) {
+                // reinitialize the system
+            }
+            if (ImGui::Combo("Scene Selection", &currentScene, sceneNames, IM_ARRAYSIZE(sceneNames))) {
+
+            }
+            if (ImGui::Checkbox("Draw Mesh", &bDrawMesh)) {
+                
+            }
+            if (ImGui::Checkbox("Draw Particle", &bDrawParticle)) {
+                
+            }
+            if (ImGui::Checkbox("Draw Voxel", &bDrawVoxel)) {
+                
+            }
+            ImGui::End();
+		}
+    }
+private:
+    bool bDrawMesh = true;
+    bool bDrawParticle = true;
+    bool bDrawVoxel = true;
+    int currentScene = 0;
+};
 
 
 

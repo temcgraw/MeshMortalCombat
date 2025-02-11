@@ -66,7 +66,7 @@ class Renderer {
         // glfw window creation
         // --------------------
         std::cout << "Creating GLFW window" << std::endl;
-        window = glfwCreateWindow(screen_width, screen_height, "RTRT", NULL, NULL);
+        window = glfwCreateWindow(screen_width, screen_height, "DestructiveAdaptiveGrid", NULL, NULL);
 
 
         if (window == NULL)
@@ -81,8 +81,7 @@ class Renderer {
         glfwSwapInterval(_vSync ? 1 : 0); // Enable vsync
 
         // tell GLFW to capture our mouse
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        //glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
         // glad: load all OpenGL function pointers
         // ---------------------------------------

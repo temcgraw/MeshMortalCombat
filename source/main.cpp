@@ -10,8 +10,8 @@
 
 
 int main() {
-    int initial_width = 800;
-    int initial_height = 600;
+    int initial_width = 1920;
+    int initial_height = 1080;
  
     // --------------------------------- create camera object ----------------------------------
     Camera * camera = new Camera(glm::vec3(0, 2, 5));
@@ -66,7 +66,9 @@ int main() {
     // ------------------------------ create log window object ---------------------------------
     bool enable_scene_tick = false; // enable/disable ticking of scene objects
     LogWindow * logWindow = new LogWindow(frameRateMonitor, camera, &enable_scene_tick);
+    DestructiveCSUI_left * destructiveCSUI_left = new DestructiveCSUI_left();
     uiManager.RegisterWindow(logWindow); // register the log window to the UI manager
+    uiManager.RegisterWindow(destructiveCSUI_left);
     // -----------------------------------------------------------------------------------------
     // ------------------- get the list of scene objects from the scene ------------------------
     // they will be ticked in the main loop (some will also be rendered in the rendering loop)

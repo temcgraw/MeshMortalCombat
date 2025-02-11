@@ -98,13 +98,12 @@ void keyboardActions(ExampleStateMachine * state_machine,CameraController * came
             }
         }
 
-        if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) {
-            camera_controller->setEnableCameraControl(false);
-            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-	    }
-        if (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS) {
+        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
             camera_controller->setEnableCameraControl(true);
-            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	    }
+        else
+        {
+            camera_controller->setEnableCameraControl(false);
         }
 
         if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) {
