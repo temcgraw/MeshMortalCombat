@@ -66,7 +66,20 @@ int main() {
     // ------------------------------ create log window object ---------------------------------
     bool enable_scene_tick = false; // enable/disable ticking of scene objects
     LogWindow * logWindow = new LogWindow(frameRateMonitor, camera, &enable_scene_tick);
-    DestructiveCSUI_left * destructiveCSUI_left = new DestructiveCSUI_left();
+    DestructiveCSSceneObject * destructiveCSSyetem = nullptr;
+    // try find the DestructiveCSSceneObject in the scene objects
+    for (SceneObject * sceneObject : Scene.sceneObjects) {
+        DestructiveCSSceneObject * destructiveCSSceneObject = dynamic_cast<DestructiveCSSceneObject*>(sceneObject);
+        if (destructiveCSSceneObject) {
+            destructiveCSSyetem = destructiveCSSceneObject;
+            break;
+        }
+    }
+    if (!destructiveCSSyetem) {
+        std::cerr << "Error: [main] failed to find DestructiveCSSceneObject in the scene objects" << std::endl;
+    }
+
+    DestructiveCSUI_left * destructiveCSUI_left = new DestructiveCSUI_left(destructiveCSSyetem);
     uiManager.RegisterWindow(logWindow); // register the log window to the UI manager
     uiManager.RegisterWindow(destructiveCSUI_left);
     // -----------------------------------------------------------------------------------------

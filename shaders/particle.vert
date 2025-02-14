@@ -1,8 +1,10 @@
-#version 430 core
+#version 460 core
 
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec2 aTexCoord;
+
+const int kPointsInBinding = 2;
 
 
 layout(std140, binding = 0) uniform RenderInfo{
@@ -19,7 +21,7 @@ struct Particle {
     uvec4 flags;
 };
 
-layout(std430, binding = 2) buffer ParticleBuffer {
+layout(std430, binding = kPointsInBinding) buffer ParticleBuffer {
     Particle particles[];
 };
 

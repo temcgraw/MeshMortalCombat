@@ -1,4 +1,4 @@
-#version 430 core
+#version 460 core
 
 
 layout(std140, binding = 0) uniform RenderInfo{
