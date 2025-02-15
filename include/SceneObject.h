@@ -121,8 +121,25 @@ protected:
 // so here we only provide a base class for compute and offers interfaces for the derived classes
 class ComputeSceneObject : public virtual SceneObject {
 public:
-    virtual void attachToSceneComputeList(std::vector<std::shared_ptr<ComputeComponent>>& computeQueue) = 0;
-    virtual void detachFromSceneComputeList(std::vector<std::shared_ptr<ComputeComponent>>& computeQueue) = 0;
+    virtual void attachToSceneComputeList(std::vector<std::shared_ptr<ComputeComponent>>& computeQueue) {
+        if (computeComponent == nullptr) {
+            std::cout<< "ERROR: [attach] ComputeComponent is nullptr\n"<<std::endl;
+            return;
+        }
+        computeQueue.push_back(computeComponent);
+    }
+    virtual void detachFromSceneComputeList(std::vector<std::shared_ptr<ComputeComponent>>& computeQueue) {
+        if (computeComponent == nullptr) {
+            std::cout<< "ERROR: [detach] ComputeComponent is nullptr\n"<<std::endl;
+            return;
+        }
+        auto it = std::find(computeQueue.begin(), computeQueue.end(), computeComponent);
+        if (it != computeQueue.end()) {
+            computeQueue.erase(it);
+        }
+    }
+protected:
+    std::shared_ptr<ComputeComponent> computeComponent;
 };
 
 

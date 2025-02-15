@@ -11,13 +11,13 @@ layout(std140, binding = 0) uniform RenderInfo{
 
 // instance properties from the particle system SSBO
 struct Particle {
-    vec4 curPos;   //we need curPos.xyz to get the position of the particle, and w to get the size of the particle
+    vec4 curPos;   //we need curPos.xyz to get the position of the particle, and w to get the size of the particle (radius)
     vec4 prevPos;  
     vec4 vel;     
     uvec4 flags;
 };
 
-layout(std430, binding = kPointsInBinding) buffer ParticleBuffer {
+layout(std430, binding = kPointsInBinding) restrict readonly buffer ParticleBuffer {
     Particle particles[];
 };
 layout (std430, binding = kVoxelConstraintsBinding) buffer VOXELS
@@ -78,13 +78,31 @@ void main()
     }
     // for each voxel's 36 vertices, determine the belonging triangle id among 12 triangles
     int triangle_id = (int(gl_VertexID) % 36) / 3;// 0~11
-    ivec3 face = face_indices[triangle_id];
-    ivec3 triangle_vertex_indices = ivec3(voxel_vertices[face.x], voxel_vertices[face.y], voxel_vertices[face.z]);
+    ivec3 face_in_voxel = face_indices[triangle_id];// the three vertices of the triangle in local indices of the voxel cube
+    ivec3 triangle_vertex_indices = ivec3(voxel_vertices[face_in_voxel.x], voxel_vertices[face_in_voxel.y], voxel_vertices[face_in_voxel.z]);// the three vertice, denoted by their global indices in the particle array
     // finally, for each triangle, determine the vertex this thread is responsible for
     int vertex_id = int(gl_VertexID) % 3;
     int vertex_index = triangle_vertex_indices[vertex_id];
     vec3 vertex = particles[vertex_index].curPos.xyz;
     
+    // shift the vertex to the corner of the voxel
+    // first, get the three basis vectors of the voxel
+    vec3 voxel_basis[3];
+    
+    voxel_basis[0] = normalize(particles[voxel_vertices[1]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz);
+    voxel_basis[1] = normalize(particles[voxel_vertices[2]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz);
+    voxel_basis[2] = normalize(particles[voxel_vertices[4]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz);
+
+
+    int vertex_id_in_voxel = face_indices[triangle_id][vertex_id];// 0~7, the local index of the vertex inside the voxel
+    vec3 vertex_offset_voxel_space = voffset[vertex_id_in_voxel];// in each voxel's local space, the offset of the particle center from the corresponding corner of the voxel
+
+    // then, get the offset of the vertex from the corner of the voxel
+    vec3 vertex_offset = (vertex_offset_voxel_space.x * voxel_basis[0] + vertex_offset_voxel_space.y * voxel_basis[1] +vertex_offset_voxel_space.z * voxel_basis[2])*particles[voxel_vertices[0]].curPos.w*1.005;
+    // then, shift the vertex to the corner of the voxel
+    vertex += vertex_offset;
+    
+
 
     gl_Position = projection * view * vec4(vertex, 1.0f);
     FragPos = vertex;

@@ -21,7 +21,7 @@ struct Particle {
     uvec4 flags;
 };
 
-layout(std430, binding = kPointsInBinding) buffer ParticleBuffer {
+layout(std430, binding = kPointsInBinding) restrict readonly buffer ParticleBuffer {
     Particle particles[];
 };
 
