@@ -87,18 +87,18 @@ bool IsSelected(uint flags) {return bool(flags & XpbdSelected);}
 
 
 
-struct VoxelFaceConstraint
+struct FaceConstraint
 {
 	ivec4 mEnd;//mEnd[0]=voxel0 base vertex, mEnd[1] = voxel1 base vertex, mEnd[2] = face0_id
 	vec2 mStrainLimit;
 	vec2 mPadding;
 };
 
-int GetBaseVertex0(VoxelFaceConstraint con) { return con.mEnd[0]; }
-int GetBaseVertex1(VoxelFaceConstraint con) { return con.mEnd[1]; }
-int GetFace0(VoxelFaceConstraint con) { return con.mEnd[2]; }
+int GetBaseVertex0(FaceConstraint con) { return con.mEnd[0]; }
+int GetBaseVertex1(FaceConstraint con) { return con.mEnd[1]; }
+int GetFace0(FaceConstraint con) { return con.mEnd[2]; }
 
-bool IsDeleted(VoxelFaceConstraint con) { return con.mEnd[0] == -1 || con.mEnd[1] == -1 || con.mEnd[2] == -1; }
+bool IsDeleted(FaceConstraint con) { return con.mEnd[0] == -1 || con.mEnd[1] == -1 || con.mEnd[2] == -1; }
 
 
 //https://www.shadertoy.com/view/NtjyWw
@@ -124,7 +124,7 @@ vec3 hash( vec3 f )
 
 layout (std430, binding = kFaceConstraintsBinding) restrict buffer FACES 
 {
-	VoxelFaceConstraint mConstraint[];
+	FaceConstraint mConstraint[];
 };
 
 layout (std430, binding = kPointsInBinding) restrict buffer PARTICLES_INOUT
@@ -133,7 +133,7 @@ layout (std430, binding = kPointsInBinding) restrict buffer PARTICLES_INOUT
 };
 
 
-void ProjVoxelFaceConstraint(int ix);
+void ProjFaceConstraint(int ix);
 void ZeroLambda(int ix);
 
 void main()
@@ -144,7 +144,7 @@ void main()
 	if(uMode==0) ZeroLambda(gid);
 	else
 	{
-		ProjVoxelFaceConstraint(gid);
+		ProjFaceConstraint(gid);
 	}
 }
 
@@ -176,9 +176,9 @@ mat3 GetEdgeVecs(vec3 cube[8])
 }
 
 
-void ProjVoxelFaceConstraint(int ix)
+void ProjFaceConstraint(int ix)
 {
-	VoxelFaceConstraint c = mConstraint[ix];
+	FaceConstraint c = mConstraint[ix];
 	if(IsDeleted(c)) return;
 
 	vec3 face0_particles[4];

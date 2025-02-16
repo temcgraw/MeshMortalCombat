@@ -2,9 +2,10 @@
 out vec4 FragColor;
 in vec3 Normal; // not used currently in this shader
 in vec3 FragPos;
+flat in int isBoundary;
 
 uniform sampler2D texture1;
-uniform vec4 color = vec4(0.6, 0.6, 0.1, 1.0);
+uniform vec4 color = vec4(0.8, 0.5, 0.7, 1.0);
 uniform bool useTexture = false;
 uniform int MaterialType = 0; //  0: lambertian, 1: metal, 2: dielectric, 3: emissive(light source), -1: unknown
 
@@ -75,6 +76,10 @@ void main()
 
 
     vec4 baseColor = texColor * color;
+    if(isBoundary == 1){
+        discard;
+        baseColor *= vec4(1.5, 0.7, 0.7, 1.0);
+    }
 
     // ambient
     ambientColor = baseColor.xyz * ambientLightColor;

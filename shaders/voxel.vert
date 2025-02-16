@@ -17,17 +17,26 @@ struct Particle {
     uvec4 flags;
 };
 
+struct VoxelConstraint{
+	int indices[8]; // 0-7
+	int isBoundary;
+	int padding[3];
+};
+
+
 layout(std430, binding = kPointsInBinding) restrict readonly buffer ParticleBuffer {
     Particle particles[];
 };
-layout (std430, binding = kVoxelConstraintsBinding) buffer VOXELS
+layout (std430, binding = kVoxelConstraintsBinding) restrict readonly buffer VOXELS
 {
-	int voxelConstraints[];
+	VoxelConstraint voxelConstraints[];
 };
 
 out vec3 Normal;
 
 out vec3 FragPos;
+
+flat out int isBoundary; // 0->not boundary, 1->boundary, all vertices of the voxel share the same value
 
 mat4 translate(mat4 m, vec3 v) {
     mat4 translationMatrix = mat4(1.0);
@@ -69,12 +78,11 @@ void main()
     // and 12 triangles
     // so each voxel has 36 vertices in drawcall
     int vox_id = int(gl_VertexID) / 36;
-    if(vox_id >= voxelConstraints.length()/8) return;
-    int voxel_vertex_base = vox_id * 8;
+    if(vox_id >= voxelConstraints.length()) return;
     int voxel_vertices[8];
     for(int i=0; i<8; i++)
     {
-        voxel_vertices[i] = voxelConstraints[voxel_vertex_base + i];
+        voxel_vertices[i] = voxelConstraints[vox_id].indices[i];
     }
     // for each voxel's 36 vertices, determine the belonging triangle id among 12 triangles
     int triangle_id = (int(gl_VertexID) % 36) / 3;// 0~11
@@ -83,7 +91,7 @@ void main()
     // finally, for each triangle, determine the vertex this thread is responsible for
     int vertex_id = int(gl_VertexID) % 3;
     int vertex_index = triangle_vertex_indices[vertex_id];
-    vec3 vertex = particles[vertex_index].curPos.xyz;
+    vec3 vertex_pos = particles[vertex_index].curPos.xyz;
     
     // shift the vertex to the corner of the voxel
     // first, get the three basis vectors of the voxel
@@ -100,10 +108,17 @@ void main()
     // then, get the offset of the vertex from the corner of the voxel
     vec3 vertex_offset = (vertex_offset_voxel_space.x * voxel_basis[0] + vertex_offset_voxel_space.y * voxel_basis[1] +vertex_offset_voxel_space.z * voxel_basis[2])*particles[voxel_vertices[0]].curPos.w*1.005;
     // then, shift the vertex to the corner of the voxel
-    vertex += vertex_offset;
+    vertex_pos += vertex_offset;
     
 
 
-    gl_Position = projection * view * vec4(vertex, 1.0f);
-    FragPos = vertex;
+    gl_Position = projection * view * vec4(vertex_pos, 1.0f);
+    FragPos = vertex_pos;
+    // use face normal as the normal of the voxel
+    vec3 vertex0 = particles[triangle_vertex_indices[0]].curPos.xyz;
+    vec3 vertex1 = particles[triangle_vertex_indices[1]].curPos.xyz;
+    vec3 vertex2 = particles[triangle_vertex_indices[2]].curPos.xyz;
+    vec3 normal = normalize(cross(vertex1 - vertex0, vertex2 - vertex0));
+    Normal = normal;
+    isBoundary = voxelConstraints[vox_id].isBoundary;
 }

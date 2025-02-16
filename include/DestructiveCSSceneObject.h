@@ -64,7 +64,8 @@ struct alignas(16) VoxelConstraint
 {
     glm::ivec4 indices_0123; // the lower 4 particle indices of the voxel constraint
     glm::ivec4 indices_4567; // the upper 4 particle indices of the voxel constraint
-    VoxelConstraint(std::vector<int> indices) {
+    glm::ivec4 flags;        // flags.x = whether surface voxel (for rendering, 0->no, 1->yes), yzw not used
+    VoxelConstraint(std::vector<int> indices, std::vector<int> _flags = {0, 0, 0, 0}) {
         if (indices.size() != 8) {
             std::cerr << "Error: [VoxelConstraint] indices size should be 8" << std::endl;
             return;
@@ -76,6 +77,14 @@ struct alignas(16) VoxelConstraint
                 indices_4567[i-4] = indices[i];
             }
         }
+        if (_flags.size() != 4) {
+            std::cerr << "Error: [VoxelConstraint] flags size should be 4" << std::endl;
+            return;
+        }
+        for (int i = 0; i < 4; i++) {
+            this->flags[i] = _flags[i];
+        }
+        
     }
 };
 
@@ -99,6 +108,17 @@ struct alignas(16) DestructiveSystemUBO{
     alignas(4) float dt;                   // time step
     alignas(4) float c;                    // damping
     alignas(4) float omega_collision;      // collision omega
+};
+
+
+// a special structure representing embedded mesh data
+// which not only contains the vertex data of the embedded mesh in voxel local space
+// but also has the voxel index of the embedded mesh
+struct EmbeddedVertex {
+    glm::vec3 position;    // position of the vertex in voxel local space
+    int voxelIndex;        // the voxel index of the embedded triangle
+    glm::vec3 normal;      // normal of the vertex
+    int padding;           // reserve for future use
 };
 
 
@@ -129,14 +149,14 @@ public:
 
 
     }
-    void initializeVoxels(const vector3d<float> &_voxels, glm::mat4 _modelMatrix = glm::mat4(1.0f)) {
+    void initializeVoxels(const vector3d<float> &_voxels, const vector3d<int> &_voxelID, const vector3d<std::vector<pos_norm>> & _embeddedMesh, glm::mat4 _modelMatrix = glm::mat4(1.0f)) {
         particles.clear();
         particles.shrink_to_fit();
         // for face constraints, we need to know the index of each voxel in voxel buffer
         // so we define a voxelID buffer to temporarily store the index of each voxel
         vector3d<int> voxelID(_voxels.size(),-1); 
         // ------------------------------------------------------------------------------------------------
-        // 1. initialize particle buffers (ping-pong buffer)
+        // 1. initialize particle buffers (ping-pong buffer) and corresponding voxel constraint buffer
         // generate particles via mesh voxelization
         // we use the voxel data to generate particles
         // the voxel data is a 3D array, each element is a float value, 0.0f means no voxel, 1.0f means voxel
@@ -182,21 +202,29 @@ public:
                     //std::cout << "pos: " << pos.x << " " << pos.y << " " << pos.z << std::endl;
                     particles.push_back(Particle(pos, particleRadius, 1.0f));
                 }
+                
+                // voxel constraints: each voxel has 8 particles
+                int baseIndex = particles.size() - 8;
+                std::vector<int> indices;
+                for(int j=0;j<8;j++){
+                    indices.push_back(baseIndex+j);
+                }
+                std::vector<int> flags({0, 0, 0, 0});
+                // check if the voxel is a surface voxel
+                if(_embeddedMesh.valid_index(glm::vec3(i,j,k))){
+                    if(_embeddedMesh.get(i,j,k).size() > 0){
+                        flags[0] = 1;
+                    }
+                }
+
+                voxelConstraints.push_back(VoxelConstraint(indices, flags));
 
             }
         }
         }
         }
         // ------------------------------------------------------------------------------------------------
-        // 2. initialize the voxel and face constraints for particles
-        // voxel constraints: each voxel has 8 particles
-        for(int i=0;i<particles.size();i+=8){
-            std::vector<int> indices;
-            for(int j=0;j<8;j++){
-                indices.push_back(i+j);
-            }
-            voxelConstraints.push_back(VoxelConstraint(indices));
-        }
+        // 2. initialize the face constraints for particles
         // face constraints: each voxel has 6 face constraints, and every two adjacent voxels share a face constraint
         // we need to generate face constraints for each pair of adjacent voxels
         const glm::ivec3 grid_size = _voxels.size();
@@ -244,9 +272,30 @@ public:
                     }
                 }
         }
-
-
-
+        // ------------------------------------------------------------------------------------------------
+        // 3. initialize the embedded mesh data (for rendering only)
+        embeddedMesh.clear();
+        embeddedMesh.shrink_to_fit();
+        //EmbeddedTriangle
+        for (int i = 0; i < _voxels.size().x; i++) {
+        for (int j = 0; j < _voxels.size().y; j++) {
+        for (int k = 0; k < _voxels.size().z; k++) {
+            if (_voxels.get(i, j, k) > 0.0f) {
+                for(const auto& vertex : _embeddedMesh.get(i,j,k)){
+                    EmbeddedVertex et;
+                    et.position = vertex.pos;
+                    et.normal = vertex.norm;
+                    et.voxelIndex = voxelID.get(i,j,k);
+                    if(et.voxelIndex==-1){
+                        std::cerr << "Error: [DestructiveCSComponent] voxel index is -1, I wrote bugs" << std::endl;
+                    }
+                    embeddedMesh.push_back(et);
+                }
+            }
+        }
+        }
+        }
+        //std::cout<<"[DestructiveCSComponent] embedded mesh data size: "<<embeddedMesh.size()<<std::endl;
     }
 
     void initializeBuffersAndShaders(){
@@ -352,6 +401,15 @@ public:
         // 6. initialize the VGS shader (both face and voxel)
         particleVGSFaceShader = new ComputeShader("shaders/particle_vgs_face.comp");
         particleVGSVoxelShader = new ComputeShader("shaders/particle_vgs_voxel.comp");
+
+
+        // ------------------------------------------------------------------------------------------------
+        // 7. initialize embedded mesh buffer
+        glGenBuffers(1, &embeddedMeshBuffer);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, embeddedMeshBuffer);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, embeddedMesh.size() * sizeof(EmbeddedVertex), embeddedMesh.data(), GL_DYNAMIC_COPY);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, embeddedMeshBufferBindingPoint, embeddedMeshBuffer);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
     }
 
@@ -566,8 +624,14 @@ public:
     int getNumVoxels() const {
         return voxelConstraints.size();
     }
+    int getNumEmbeddedVertices() const {
+        return embeddedMesh.size();
+    }
     GLuint getSystemUBOBuffer() const {
         return systemUBOBuffer;
+    }
+    GLuint getEmbeddedMeshBuffer() const {
+        return embeddedMeshBuffer;
     }
 
 private:
@@ -580,6 +644,10 @@ private:
     // CPU side voxel constraints and face constraints data
     std::vector<VoxelConstraint> voxelConstraints;
     std::vector<FaceConstraint> faceConstraints[3]; // faces have X, Y, Z three directions, so we need 3 buffers for partition
+    // CPU side embedded mesh data
+    std::vector<EmbeddedVertex> embeddedMesh;// x1,y1,z1,x2,y2,z2,... for now
+    // GPU side embedded mesh data, should be binded as SSBO
+    GLuint embeddedMeshBuffer;
     // GPU side voxel constraints and face constraints data, should be binded as SSBO
     GLuint voxelConstraintsBuffer;
     GLuint faceConstraintsBuffer[3]; // faces have X, Y, Z three directions, so we need 3 buffers for partition
@@ -618,6 +686,7 @@ public:
     const GLuint compactContentBindingPoint = 6;
     const GLuint voxelConstraintsBindingPoint = 7;
     const GLuint faceConstraintsBindingPoint = 8;
+    const GLuint embeddedMeshBufferBindingPoint = 9; // I hope I can get rid of this buffer in the future
 
 };
 
@@ -627,10 +696,14 @@ public:
     DestructiveRenderComponent(RenderContext * _context = nullptr) {
         // initialize the particle shader
         particleShader = new Shader("shaders/particle.vert", "shaders/particle.frag");
-        // initialize the voxel shader, not implemented yet
-        voxelShader = new Shader("shaders/voxel.vert", "shaders/voxel.frag");
-        // initialize the VAO, VBO, EBO
+        // initialize the VAO, VBO, EBO for particle rendering--a sphere
         generateBufferResource();
+        // initialize the voxel shader
+        // common cubic voxel shader
+        voxelShader = new Shader("shaders/voxel.vert", "shaders/voxel.frag");
+        // the voxel plus embedded mesh shader, used for rendering surface voxels of the mesh
+        skinShader = new Shader("shaders/voxel_skin.vert", "shaders/voxel_skin.frag");
+
 
         debugShader = new Shader("shaders/debug_AABB.vert", "shaders/debug_AABB.frag");
         glGenVertexArrays(1, &debug_VAO); // openGL sometimes requires a VAO to draw something, even if we don't use it
@@ -679,6 +752,17 @@ public:
 
 
         // -------------------------------------------------------------------
+        // --------------------skin mesh rendering----------------------------
+        if(bRenderSkinMesh){
+            skinShader->use();
+            glBindVertexArray(debug_VAO);// nothing to do with the VAO, just to avoid the OpenGL error
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, computeComponent.lock()->inputParticleBindingPoint, computeComponent.lock()->getParticleBuffer()[0]);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, computeComponent.lock()->embeddedMeshBufferBindingPoint, computeComponent.lock()->getEmbeddedMeshBuffer());
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, computeComponent.lock()->voxelConstraintsBindingPoint, computeComponent.lock()->getVoxelConstraintsBuffer());
+            // no instance rendering, just draw the voxel mesh by drawing a lot of vertices which are generated by reading the voxel data and particle data
+            glDrawArrays(GL_TRIANGLES, 0, computeComponent.lock()->getNumEmbeddedVertices());
+            glBindVertexArray(0);
+        }
 
 
 
@@ -812,8 +896,14 @@ public:
     DestructiveCSSceneObject(std::shared_ptr<GModel> _targetMesh , RenderContext * _context = nullptr) : RenderableSceneObject() {
         this->targetMesh = _targetMesh;
         if(targetMesh){
-            this->voxelGeneratorComponent = std::make_shared<VoxelGeneratorComponent>(targetMesh.get());
+            this->voxelGeneratorComponent = std::make_shared<VoxelGeneratorComponent>(targetMesh.get(),glm::ivec3(32,32,32));
+            voxelGeneratorComponent->GenerateVoxelData();
+            voxelGeneratorComponent->GenerateEmbeddedMeshSurfaceData();
+            // get necessary data from the voxel generator component
             mVoxels = voxelGeneratorComponent->getVoxels();
+            voxelID = voxelGeneratorComponent->getVoxelID();
+            embeddedMeshData = voxelGeneratorComponent->getEmbeddedMeshData();
+            
         }
         else{
             std::cerr << "Error: [DestructiveCSSceneObject] failed to cast targetMesh" << std::endl;
@@ -853,7 +943,7 @@ public:
 
             
             
-            computeComponentDerived->initializeVoxels(mVoxels, modelMatrix);
+            computeComponentDerived->initializeVoxels(mVoxels,voxelID, embeddedMeshData, modelMatrix);
             computeComponentDerived->initializeBuffersAndShaders();
         }
         else{
@@ -909,8 +999,10 @@ protected:
     // and also a voxel render component, to initialize the voxel data and particle data
     std::shared_ptr<VoxelGeneratorComponent> voxelGeneratorComponent;
     std::shared_ptr<GModel> targetMesh;// we assume the target mesh is a GModel with only one mesh currently
-    // get it from VoxelGeneratorComponent
+    // get them from VoxelGeneratorComponent
     vector3d<float> mVoxels;
+    vector3d<std::vector<pos_norm>> embeddedMeshData;
+    vector3d<int> voxelID;
 };
 
 

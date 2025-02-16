@@ -272,6 +272,12 @@ bool triBoxOverlap(glm::vec3 boxcenter, glm::vec3 boxhalfsize, glm::vec3 trivert
 
 }
 
+// a struct to store the position and normal of a vertex
+struct pos_norm{
+   glm::vec3 pos;
+   glm::vec3 norm;
+};
+
 
 
 // one important thing: the voxelization resolution should be the same in all three dimensions
@@ -289,7 +295,6 @@ public:
       model = _model;
       mesh = model->meshes[0];
       grid_size = _grid_size;
-      GenerateVoxelData();
    }
     // it won't tick, because it does voxelization only during initialization
     // or when user orders to do so (should be implemented via callbacks)
@@ -316,8 +321,8 @@ public:
       glm::vec3 boundingBox_center = (boundingBox_max + boundingBox_min) * 0.5f;
       // !!! we use the max axis to scale the voxel data, because in the end we want
       // voxels be cubic instead of rectangular parallelepiped
-      float maxAxis = std::max(std::max(boundingBox_size.x, boundingBox_size.y), boundingBox_size.z);
-      glm::vec3 scale = glm::vec3(maxAxis);
+      float maxAxisLen = std::max(std::max(boundingBox_size.x, boundingBox_size.y), boundingBox_size.z);
+      glm::vec3 scale = glm::vec3(maxAxisLen);
 
       //std::cout << "bounding box min: " << boundingBox_min.x << " " << boundingBox_min.y << " " << boundingBox_min.z << std::endl;
       //std::cout << "bounding box max: " << boundingBox_max.x << " " << boundingBox_max.y << " " << boundingBox_max.z << std::endl;
@@ -326,6 +331,9 @@ public:
 
       mVoxels.resize(grid_size);
       mVoxels.fill(0.0f);
+
+      voxelID.resize(grid_size);
+      voxelID.fill(-1);
 
       int num_triangles = mesh->indices.size() / 3;
 
@@ -351,8 +359,99 @@ public:
                po[v] = po[v] - glm::vec4(boundingBox_min, 0.0f);
                po[v] = po[v] / glm::vec4(scale, 1.0f);
 
-              
+               // convert normalized vertex position into voxel space where each dimension is an integer between 0 to grid_size-1
+               // each voxel is a cubic 1x1x1 unit
                pvox[v] = glm::vec3(po[v]) * glm::vec3(grid_size);
+
+            //update bbox
+            bbmin = glm::min(bbmin, pvox[v]);
+            bbmax = glm::max(bbmax, pvox[v]);
+
+           
+         }
+         int currentVoxelNum = 0;
+         //for each voxel overlapped by bounding box
+         for (int i = bbmin.x; i <= bbmax.x; i++)
+         for (int j = bbmin.y; j <= bbmax.y; j++)
+         for (int k = bbmin.z; k <= bbmax.z; k++)
+         {
+            if(mVoxels.valid_index(glm::vec3(i,j,k)))
+            {
+               const float eps = 0.001f;
+               glm::vec3 cen = glm::vec3(i,j,k)+glm::vec3(0.5f);
+               const glm::vec3 half(0.5f + eps);
+               if(triBoxOverlap(cen, half, pvox))
+               {
+                  mVoxels.set(i, j, k, 1.0f);
+                  voxelID.set(i, j, k, currentVoxelNum);
+                  currentVoxelNum++;
+               }
+            }
+         }
+      }
+      //filled voxelization
+      mVoxels = imfill(mVoxels);
+
+   }
+
+   // the most painful part
+   void GenerateEmbeddedMeshSurfaceData(){
+      // assume the voxel data has been generated
+      if(mesh == nullptr) {
+         std::cerr << "[VoxelGeneratorComponent]: mesh is nullptr" << std::endl;
+         return;
+      }
+      // check the resolution, make sure three dimensions are the same
+      if (grid_size.x != grid_size.y || grid_size.x != grid_size.z) {
+         std::cerr << "[VoxelGeneratorComponent]: grid size is not cubic" << std::endl;
+         return;
+      }
+
+
+      glm::vec3 boundingBox_min = mesh->AA;
+      glm::vec3 boundingBox_max = mesh->BB;
+      glm::vec3 boundingBox_size = boundingBox_max - boundingBox_min;
+      glm::vec3 boundingBox_center = (boundingBox_max + boundingBox_min) * 0.5f;
+      float maxAxisLen = std::max(std::max(boundingBox_size.x, boundingBox_size.y), boundingBox_size.z);
+      glm::vec3 scale = glm::vec3(maxAxisLen);
+
+
+      int num_triangles = mesh->indices.size() / 3;
+
+      // check whether the voxel data has been generated
+      if(mVoxels.size().x == 0) {
+         std::cerr << "[VoxelGeneratorComponent]: voxel data has not been generated" << std::endl;
+         return;
+      }
+      embeddedMeshData.resize(grid_size);
+
+
+
+      //for each triangle in mesh
+      for (int t = 0; t < num_triangles; t++)
+      {
+         glm::uvec3 ix = glm::uvec3(mesh->indices[t * 3], mesh->indices[t * 3 + 1], mesh->indices[t * 3 + 2]);
+         glm::vec4 po[3];
+         glm::vec4 pw[3];
+         glm::vec3 pn[3];
+         glm::vec3 pvox[3];
+
+         glm::vec3 bbmin = glm::vec3(1e10f);
+         glm::vec3 bbmax = glm::vec3(-1e10f);
+
+         //for each vertex in triangle
+         for (int v = 0; v < 3; v++)
+         {
+               po[v] = glm::vec4(mesh->positions[ix[v]], 1.0f);
+               // normalize vertex position into 0-1 range
+               po[v] = po[v] - glm::vec4(boundingBox_min, 0.0f);
+               po[v] = po[v] / glm::vec4(scale, 1.0f);
+
+               // convert normalized vertex position into voxel space where each dimension is an integer between 0 to grid_size-1
+               // each voxel is a cubic 1x1x1 unit
+               pvox[v] = glm::vec3(po[v]) * glm::vec3(grid_size);
+
+               pn[v] = mesh->normals[ix[v]];
 
             //update bbox
             bbmin = glm::min(bbmin, pvox[v]);
@@ -373,18 +472,54 @@ public:
                const glm::vec3 half(0.5f + eps);
                if(triBoxOverlap(cen, half, pvox))
                {
-                  mVoxels.set(i, j, k, 1.0f);
+                  // 1. convert the triangle to the target voxel's local space
+                  // which ranging from 0,0,0 to 1,1,1
+                  glm::vec3 localTri[3];
+                  for (int v = 0; v < 3; v++) {
+                     localTri[v] = pvox[v] - glm::vec3(i, j, k);
+                  }
+                  // 2. calculate the intersection points of the triangle and the voxel's faces
+                  // not implemented yet
+                  std::vector<pos_norm> embeddedTriangle;
+                  // now we only store the original triangle's vertices
+                  embeddedTriangle.push_back({localTri[0], pn[0]});
+                  embeddedTriangle.push_back({localTri[1], pn[1]});
+                  embeddedTriangle.push_back({localTri[2], pn[2]});
+                  // 3. store the embedded triangle data into the voxel data structure
+                  if(embeddedMeshData.valid_index(glm::vec3(i,j,k))) {
+                     // add the embedded triangle data to the corresponding voxel
+                     auto& voxelData = embeddedMeshData.getRef(i, j, k);
+                     for (const auto& vertex : embeddedTriangle) {
+                        voxelData.push_back(vertex);
+                     }
+                  }
+                  
+                  
+
+
                }
             }
          }
       }
-      //filled voxelization
-      mVoxels = imfill(mVoxels);
+      
 
    }
+
+
+
    // get a copy of the voxel data
    vector3d<float> getVoxels() {
       return mVoxels;
+   }
+
+   // get the embedded mesh data
+   vector3d<std::vector<pos_norm>> getEmbeddedMeshData() {
+      return embeddedMeshData;
+   }
+
+   // get the voxel ID
+   vector3d<int> getVoxelID() {
+      return voxelID;
    }
 
 private:
@@ -392,7 +527,8 @@ GModel * model;// the model to be voxelized, currently we only voxelized the mod
 GMesh * mesh;// the mesh to be voxelized
 vector3d<float> mVoxels;
 glm::ivec3 grid_size;
-
+vector3d<std::vector<pos_norm>> embeddedMeshData;
+vector3d<int> voxelID; // though we can calculate the voxelID on the fly by counting from 0,0,0 to target voxel, store a lookup table is more convenient
 
 };
 

@@ -24,6 +24,8 @@ struct vector3d
    T get(const glm::ivec3& coord) const;
    T get(int i, int j, int k) const;
    T get_clamp(int i, int j, int k) const;
+   T& getRef(const glm::ivec3& coord);
+   T& getRef(int i, int j, int k);
 
    void set(int i, int j, int k, const T& val);
    void set(const glm::ivec3& coord, const T& val);
@@ -75,6 +77,22 @@ T vector3d<T>::get(const glm::ivec3& coord) const
    int ix = index(coord);
    return mVec[ix];
 }
+
+// added reference getter
+template <class T>
+T& vector3d<T>::getRef(int i, int j, int k)
+{
+    int ix = index(glm::ivec3(i, j, k));
+    return mVec[ix];
+}
+
+template <class T>
+T& vector3d<T>::getRef(const glm::ivec3& coord)
+{
+    int ix = index(coord);
+    return mVec[ix];
+}
+
 
 template <class T>
 T vector3d<T>::get_clamp(int i, int j, int k) const

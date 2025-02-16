@@ -88,18 +88,26 @@ bool IsSelected(uint flags) {return bool(flags & XpbdSelected);}
 
 
 
-struct VoxelFaceConstraint
+struct FaceConstraint
 {
 	ivec4 mEnd;//mEnd[0]=voxel0 base vertex, mEnd[1] = voxel1 base vertex, mEnd[2] = face0_id
 	vec2 mStrainLimit;
 	vec2 mPadding;
 };
 
-int GetBaseVertex0(VoxelFaceConstraint con) { return con.mEnd[0]; }
-int GetBaseVertex1(VoxelFaceConstraint con) { return con.mEnd[1]; }
-int GetFace0(VoxelFaceConstraint con) { return con.mEnd[2]; }
 
-bool IsDeleted(VoxelFaceConstraint con) { return con.mEnd[0] == -1 || con.mEnd[1] == -1 || con.mEnd[2] == -1; }
+struct VoxelConstraint{
+	int indices[8]; // 0-7
+	int isBoundary;
+	int padding[3];
+};
+
+
+int GetBaseVertex0(FaceConstraint con) { return con.mEnd[0]; }
+int GetBaseVertex1(FaceConstraint con) { return con.mEnd[1]; }
+int GetFace0(FaceConstraint con) { return con.mEnd[2]; }
+
+bool IsDeleted(FaceConstraint con) { return con.mEnd[0] == -1 || con.mEnd[1] == -1 || con.mEnd[2] == -1; }
 
 
 
@@ -110,7 +118,7 @@ layout (std430, binding = kPointsInBinding) restrict buffer PARTICLES_INOUT
 };
 layout (std430, binding = kVoxelConstraintsBinding) restrict readonly buffer VOXELS
 {
-	int voxelConstraints[];
+	VoxelConstraint voxelConstraints[];
 };
 
 
@@ -165,8 +173,7 @@ int index_of_min(vec3 v)
 void VGS(int vox_id)
 {
 	XpbdParticle prt[8];
-	int base_particle = uGridStride.x * vox_id;
-	base_particle = voxelConstraints[uGridStride.x * vox_id];
+	int base_particle = voxelConstraints[vox_id].indices[0];
 
 
 	float sum_w = 0.0;
