@@ -94,18 +94,19 @@ void main()
     {
         voxel_vertices[i] = voxelConstraints[vox_id].indices[i];
     }
-    vec3 voxel_basis[3];
-    //voxel_basis[0] = normalize(particles[voxel_vertices[1]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz);
-    //voxel_basis[1] = normalize(particles[voxel_vertices[2]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz);
-    //voxel_basis[2] = normalize(particles[voxel_vertices[4]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz);
+    vec3 voxel_basis[3], voxel_basis_scaled[3];
+    voxel_basis[0] = normalize(particles[voxel_vertices[1]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz);
+    voxel_basis[1] = normalize(particles[voxel_vertices[2]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz);
+    voxel_basis[2] = normalize(particles[voxel_vertices[4]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz);
     // maybe we should not normalize the basis vectors 
     // to keep the scale of the voxel
-    voxel_basis[0] = (particles[voxel_vertices[1]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz)/(particles[voxel_vertices[0]].curPos.w*2);
-    voxel_basis[1] = (particles[voxel_vertices[2]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz)/(particles[voxel_vertices[0]].curPos.w*2);
-    voxel_basis[2] = (particles[voxel_vertices[4]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz)/(particles[voxel_vertices[0]].curPos.w*2);
+    voxel_basis_scaled[0] = (particles[voxel_vertices[1]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz)/(particles[voxel_vertices[0]].curPos.w*2);
+    voxel_basis_scaled[1] = (particles[voxel_vertices[2]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz)/(particles[voxel_vertices[0]].curPos.w*2);
+    voxel_basis_scaled[2] = (particles[voxel_vertices[4]].curPos.xyz - particles[voxel_vertices[0]].curPos.xyz)/(particles[voxel_vertices[0]].curPos.w*2);
 
-    vec3 voxel_base_pos = particles[voxel_vertices[0]].curPos.xyz; // the position of the first particle in the voxel
-    vec3 vertex_offset = (voxel_basis[0] * pos.x + voxel_basis[1] * pos.y + voxel_basis[2] * pos.z) * particles[voxel_vertices[0]].curPos.w * 4;
+    vec3 particle_base_pos = particles[voxel_vertices[0]].curPos.xyz; // the position of the first particle in the voxel, but still has some distance to the corner of the voxel
+    vec3 voxel_base_pos = particle_base_pos - (voxel_basis[0] + voxel_basis[1] + voxel_basis[2]) * particles[voxel_vertices[0]].curPos.w;// notice this part we don't use voxel_basis_scaled
+    vec3 vertex_offset = (voxel_basis_scaled[0] * pos.x + voxel_basis_scaled[1] * pos.y + voxel_basis_scaled[2] * pos.z) * particles[voxel_vertices[0]].curPos.w * 4;
 
     vec3 vertex_pos = voxel_base_pos + vertex_offset;
     gl_Position = projection * view * vec4(vertex_pos, 1.0);
