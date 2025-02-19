@@ -6,8 +6,13 @@
 #include "CommonSceneObject.h"
 
 #include "vector3d.hpp" // probably rewrite this later...
-
 #include <queue>
+
+#include "GeometryPreprocess.h"
+
+// it will set external empty voxels to 0.0f
+// and internal voxels to 1.0f
+// and boundary voxels to 2.0f
 vector3d<float> imfill(const vector3d<float>& im)
 {
 	vector3d<float> filled(im.size());
@@ -40,6 +45,10 @@ vector3d<float> imfill(const vector3d<float>& im)
 				}
 			}
 		}
+      else if(im.get(p) == 1.0f && filled.get(p) == 1.0f)
+      {
+         filled.set(p, 2.0f);
+      }
 	}
 	return filled;
 }
@@ -272,11 +281,6 @@ bool triBoxOverlap(glm::vec3 boxcenter, glm::vec3 boxhalfsize, glm::vec3 trivert
 
 }
 
-// a struct to store the position and normal of a vertex
-struct pos_norm{
-   glm::vec3 pos;
-   glm::vec3 norm;
-};
 
 
 
@@ -474,22 +478,37 @@ public:
                {
                   // 1. convert the triangle to the target voxel's local space
                   // which ranging from 0,0,0 to 1,1,1
-                  glm::vec3 localTri[3];
+                  glm::vec3 localTriPos[3];
                   for (int v = 0; v < 3; v++) {
-                     localTri[v] = pvox[v] - glm::vec3(i, j, k);
+                     localTriPos[v] = pvox[v] - glm::vec3(i, j, k);
                   }
-                  // 2. calculate the intersection points of the triangle and the voxel's faces
-                  // not implemented yet
-                  std::vector<pos_norm> embeddedTriangle;
-                  // now we only store the original triangle's vertices
-                  embeddedTriangle.push_back({localTri[0], pn[0]});
-                  embeddedTriangle.push_back({localTri[1], pn[1]});
-                  embeddedTriangle.push_back({localTri[2], pn[2]});
+
+                  pos_norm localTri[3];
+                  for (int v = 0; v < 3; v++) {
+                     localTri[v] = {localTriPos[v], pn[v]};
+                  }
+
+                  // 2. clipping the triangle to the voxel's bounding box
+                  std::vector<std::array<pos_norm, 3>> clippedTriangles = clipTriangleToUnitCube(localTri[0], localTri[1], localTri[2]);
+
+
+                  // 3. calculate the intersection points of the triangle and the voxel's faces
+                  std::vector<pos_norm> embeddedTriangleVertices;
+                  for(const auto& clippedTri : clippedTriangles) {
+                     embeddedTriangleVertices.push_back(clippedTri[0]);
+                     embeddedTriangleVertices.push_back(clippedTri[1]);
+                     embeddedTriangleVertices.push_back(clippedTri[2]);
+                  }
+
+                  // only store the original triangle's vertices
+                  // embeddedTriangleVertices.push_back(localTri[0]);
+                  // embeddedTriangleVertices.push_back(localTri[1]);
+                  // embeddedTriangleVertices.push_back(localTri[2]);
                   // 3. store the embedded triangle data into the voxel data structure
                   if(embeddedMeshData.valid_index(glm::vec3(i,j,k))) {
                      // add the embedded triangle data to the corresponding voxel
                      auto& voxelData = embeddedMeshData.getRef(i, j, k);
-                     for (const auto& vertex : embeddedTriangle) {
+                     for (const auto& vertex : embeddedTriangleVertices) {
                         voxelData.push_back(vertex);
                      }
                   }

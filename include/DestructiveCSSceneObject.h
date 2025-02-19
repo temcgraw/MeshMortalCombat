@@ -211,9 +211,15 @@ public:
                 }
                 std::vector<int> flags({0, 0, 0, 0});
                 // check if the voxel is a surface voxel
-                if(_embeddedMesh.valid_index(glm::vec3(i,j,k))){
-                    if(_embeddedMesh.get(i,j,k).size() > 0){
-                        flags[0] = 1;
+                if(_voxels.valid_index(glm::vec3(i,j,k))){
+                    // surface voxel refers to the voxel which has surface mesh triangles to render
+                    // so in shader we don't want to render them unlike the inner voxels
+                    // the ideal way to identify surface voxels is to check if the voxel has surface mesh triangles
+                    // but sometimes some boundary voxels may not have surface mesh triangles after triangle culling
+                    // so we also check whether the voxel is a boundary voxel
+                    // surface voxels must be boundary voxels, but not all boundary voxels are surface voxels!
+                    if(_voxels.get(i,j,k) == 2.0f||_embeddedMesh.get(i,j,k).size() > 0){
+                        flags[0] = 1;// indicate that this voxel is a surface voxel
                     }
                 }
 
