@@ -162,7 +162,7 @@ public:
          std::cerr << "[VoxelGeneratorComponent]: voxel data has not been generated" << std::endl;
          return;
       }
-      embeddedMeshData.resize(grid_size);
+      embeddedSurfaceMeshData.resize(grid_size);
       embeddedVoxelMeshData.resize(grid_size);
 
 
@@ -237,9 +237,9 @@ public:
                   // embeddedTriangleVertices.push_back(localTri[2]);
 
                   // 3. store the embedded triangle data into the voxel data structure
-                  if(embeddedMeshData.valid_index(glm::vec3(i,j,k))) {
+                  if(embeddedSurfaceMeshData.valid_index(glm::vec3(i,j,k))) {
                      // add the embedded triangle data to the corresponding voxel
-                     auto& voxelData = embeddedMeshData.getRef(i, j, k);
+                     auto& voxelData = embeddedSurfaceMeshData.getRef(i, j, k);
                      for (const auto& vertex : embeddedTriangleVertices) {
                         voxelData.push_back(vertex);
                      }
@@ -484,7 +484,7 @@ public:
       for (int k = 0; k < grid_size.z; k++)
       {
          // ensure this is a surface voxel
-         if(embeddedMeshData.get(i,j,k).size()==0){
+         if(embeddedSurfaceMeshData.get(i,j,k).size()==0){
             continue;
          }
          auto& voxelData = embeddedVoxelMeshData.getRef(i, j, k);
@@ -516,7 +516,7 @@ public:
                }             
             }
             // then find the intersection edges from the intersection triangles on the face
-            auto& voxelSurfaceData = embeddedMeshData.getRef(i, j, k);
+            auto& voxelSurfaceData = embeddedSurfaceMeshData.getRef(i, j, k);
             int faceDirection = face/2; // face 0,1 is x direction, face 2,3 is y direction, face 4,5 is z direction
             float faceDirectionValue = (face%2==0)?0.0f:1.0f; // face 0,2,4 is min face, face 1,3,5 is max face
             // find all the intersection edges
@@ -552,17 +552,10 @@ public:
             for(int id = 0; id < embeddedTriangleVertices[face].size(); id++) {
                voxelData.push_back(embeddedTriangleVertices[face][id]);
             }
-
-
          }
-
       }
-
-
    }
    
-
-
 
    // get a copy of the voxel data
    vector3d<float> getVoxels() {
@@ -571,7 +564,7 @@ public:
 
    // get the embedded mesh data
    vector3d<std::vector<pos_norm>> getEmbeddedMeshData() {
-      return embeddedMeshData;
+      return embeddedSurfaceMeshData;
    }
 
    vector3d<std::vector<pos_norm>> getEmbeddedVoxelMeshData() {
@@ -589,27 +582,12 @@ GModel * model;// the model to be voxelized, currently we only voxelized the mod
 GMesh * mesh;// the mesh to be voxelized
 vector3d<float> mVoxels;
 glm::ivec3 grid_size;
-vector3d<std::vector<pos_norm>> embeddedMeshData;
-vector3d<std::vector<pos_norm>> embeddedVoxelMeshData; // temporary data structure, in future we should merge it with embeddedMeshData
+vector3d<std::vector<pos_norm>> embeddedSurfaceMeshData;
+vector3d<std::vector<pos_norm>> embeddedVoxelMeshData; // temporary data structure, in future we should merge it with embeddedSurfaceMeshData
 vector3d<int> voxelID; // though we can calculate the voxelID on the fly by counting from 0,0,0 to target voxel, store a lookup table is more convenient
 
 
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
