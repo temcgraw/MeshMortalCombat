@@ -13,6 +13,8 @@
 // ----------------------------------------------------------------------------------------------------------
 // ----------------------------------------------------------------------------------------------------------
 #include "vector3d.hpp" // probably rewrite this later...
+
+// flood fill algorithm
 // it will set external empty voxels to 0.0f
 // and internal voxels to 1.0f
 // and boundary voxels to 2.0f
@@ -24,6 +26,7 @@ vector3d<float> imfill(const vector3d<float>& im)
 		filled.mVec[i] = 1.0f;
 	}
 
+    // adding only one seed is not enough, at least test all the boundary voxels
 	const glm::ivec3 seed(0, 0, 0);
 	std::queue<glm::ivec3> q;
 	q.push(seed);

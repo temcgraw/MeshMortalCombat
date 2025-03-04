@@ -149,12 +149,14 @@ public:
 
 
     }
-    void initializeVoxels(const vector3d<float> &_voxels, const vector3d<int> &_voxelID, const vector3d<std::vector<pos_norm>> & _embeddedMesh, const vector3d<std::vector<pos_norm>> & _embeddedVoxelMesh, glm::mat4 _modelMatrix = glm::mat4(1.0f)) {
+    void initializeVoxels(const vector3d<float> &_voxels, const vector3d<std::vector<pos_norm>> & _embeddedMesh, const vector3d<std::vector<pos_norm>> & _embeddedVoxelMesh, glm::mat4 _modelMatrix = glm::mat4(1.0f)) {
         particles.clear();
         particles.shrink_to_fit();
         // for face constraints, we need to know the index of each voxel in voxel buffer
         // so we define a voxelID buffer to temporarily store the index of each voxel
-        vector3d<int> voxelID(_voxels.size(),-1); 
+
+        voxelID.resize(_voxels.size());
+        voxelID.fill(-1);
         // ------------------------------------------------------------------------------------------------
         // 1. initialize particle buffers (ping-pong buffer) and corresponding voxel constraint buffer
         // generate particles via mesh voxelization
@@ -684,6 +686,7 @@ private:
     std::vector<GLuint> particleBuffers;// size should be 2
     // CPU side voxel constraints and face constraints data
     std::vector<VoxelConstraint> voxelConstraints;
+    vector3d<int> voxelID;
     std::vector<FaceConstraint> faceConstraints[3]; // faces have X, Y, Z three directions, so we need 3 buffers for partition
     // CPU side embedded mesh data
     std::vector<EmbeddedVertex> embeddedMesh;// x1,y1,z1,x2,y2,z2,... for now
@@ -957,7 +960,6 @@ public:
             voxelGeneratorComponent->GenerateEmbeddedMeshSurfaceData();
             // get necessary data from the voxel generator component
             mVoxels = voxelGeneratorComponent->getVoxels();
-            voxelID = voxelGeneratorComponent->getVoxelID();
             embeddedMeshData = voxelGeneratorComponent->getEmbeddedMeshData();
             embeddedVoxelMeshData = voxelGeneratorComponent->getEmbeddedVoxelMeshData();
             
@@ -1000,7 +1002,7 @@ public:
 
             
             
-            computeComponentDerived->initializeVoxels(mVoxels,voxelID, embeddedMeshData, embeddedVoxelMeshData, modelMatrix);
+            computeComponentDerived->initializeVoxels(mVoxels, embeddedMeshData, embeddedVoxelMeshData, modelMatrix);
             computeComponentDerived->initializeBuffersAndShaders();
         }
         else{
@@ -1064,7 +1066,6 @@ protected:
     vector3d<float> mVoxels;
     vector3d<std::vector<pos_norm>> embeddedMeshData;
     vector3d<std::vector<pos_norm>> embeddedVoxelMeshData;
-    vector3d<int> voxelID;
 };
 
 

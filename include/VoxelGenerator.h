@@ -67,13 +67,11 @@ public:
       mVoxels.resize(grid_size);
       mVoxels.fill(0.0f);
 
-      voxelID.resize(grid_size);
-      voxelID.fill(-1);
 
       int num_triangles = mesh->indices.size() / 3;
 
 
-
+      int currentVoxelNum = 0;
       //for each triangle in mesh
       for (int t = 0; t < num_triangles; t++)
       {
@@ -102,7 +100,6 @@ public:
 
            
          }
-         int currentVoxelNum = 0;
          //for each voxel overlapped by bounding box
          for (int i = bbmin.x; i <= bbmax.x; i++)
          for (int j = bbmin.y; j <= bbmax.y; j++)
@@ -116,8 +113,6 @@ public:
                if(triBoxOverlap(cen, half, pvox))
                {
                   mVoxels.set(i, j, k, 1.0f);
-                  voxelID.set(i, j, k, currentVoxelNum);
-                  currentVoxelNum++;
                }
             }
          }
@@ -571,12 +566,6 @@ public:
       return embeddedVoxelMeshData;
    }
 
-
-   // get the voxel ID
-   vector3d<int> getVoxelID() {
-      return voxelID;
-   }
-
 private:
 GModel * model;// the model to be voxelized, currently we only voxelized the model's first mesh
 GMesh * mesh;// the mesh to be voxelized
@@ -584,7 +573,6 @@ vector3d<float> mVoxels;
 glm::ivec3 grid_size;
 vector3d<std::vector<pos_norm>> embeddedSurfaceMeshData;
 vector3d<std::vector<pos_norm>> embeddedVoxelMeshData; // temporary data structure, in future we should merge it with embeddedSurfaceMeshData
-vector3d<int> voxelID; // though we can calculate the voxelID on the fly by counting from 0,0,0 to target voxel, store a lookup table is more convenient
 
 
 };
