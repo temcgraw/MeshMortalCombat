@@ -40,6 +40,7 @@ uniform float Constant = 1.0;
 uniform float Linear = 0.8;
 uniform float Quadratic = 0.56;
 
+in flat int vertexIndex;
 
 void main()
 {
@@ -75,7 +76,8 @@ void main()
 
 
     vec4 baseColor = texColor * color;
-
+    // debug, show triangle by its vertex index
+    //baseColor = vec4(fract(vec3(vertexIndex) * 0.1), 1.0);
 
     // ambient
     ambientColor = baseColor.xyz * ambientLightColor;

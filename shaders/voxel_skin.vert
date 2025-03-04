@@ -31,6 +31,8 @@ struct EmbeddedVertex{
     int padding;
 };
 
+uniform int meshIndexStart = 0;
+
 
 layout(std430, binding = kPointsInBinding) restrict readonly buffer ParticleBuffer {
     Particle particles[];
@@ -47,6 +49,8 @@ layout(std430, binding = kEmbeddedVerticesBinding) restrict readonly buffer Embe
 out vec3 Normal;
 
 out vec3 FragPos;
+
+out flat int vertexIndex;
 
 
 mat4 translate(mat4 m, vec3 v) {
@@ -85,10 +89,14 @@ const vec3 voffset[8] = vec3[8]( vec3(-1.0, -1.0, -1.0), vec3(+1.0, -1.0, -1.0),
 
 void main()
 {
-    vec3 pos = vertices[gl_VertexID].pos; // the position of the vertex in the current voxel's local space
+    int VertexID = gl_VertexID + meshIndexStart;
+    vec3 pos = vertices[VertexID].pos; // the position of the vertex in the current voxel's local space
     // now we need to find the voxel that contains this vertex
     // and convert the vertex position to world space via the voxel's transformation matrix
-    int vox_id = vertices[gl_VertexID].voxelIndex;
+    int vox_id = vertices[VertexID].voxelIndex;
+    //if(vox_id==-1){
+    //    vox_id = 0;
+    //}
     int voxel_vertices[8];
     for(int i=0; i<8; i++)
     {
@@ -112,6 +120,6 @@ void main()
     gl_Position = projection * view * vec4(vertex_pos, 1.0);
     FragPos = vertex_pos;
 
-    Normal = normalize(voxel_basis[0] * vertices[gl_VertexID].normal.x + voxel_basis[1] * vertices[gl_VertexID].normal.y + voxel_basis[2] * vertices[gl_VertexID].normal.z);
-    
+    Normal = normalize(voxel_basis[0] * vertices[VertexID].normal.x + voxel_basis[1] * vertices[VertexID].normal.y + voxel_basis[2] * vertices[VertexID].normal.z);
+    vertexIndex = VertexID;
 }

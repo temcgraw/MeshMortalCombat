@@ -93,8 +93,8 @@ public:
         // maybe use GModel instead of CommonSceneObject
         // the armadillo we want to voxelize and destruct
         GModel * armadillo = new GModel("resource/armadillo.obj");
-        CommonSceneObject * CommonSceneObject_ARMADILLO = new CommonSceneObject(armadillo,OPAQUE,renderContext);
-        CommonSceneObject_ARMADILLO->setMaterial(LAMBERTIAN, 0.0, glm::vec4(0.6, 0.7, 1.0, 1.0));
+        CommonSceneObject * CommonSceneObject_ARMADILLO = new CommonSceneObject(armadillo,TRANSPARENT,renderContext);
+        CommonSceneObject_ARMADILLO->setMaterial(LAMBERTIAN, 0.0, glm::vec4(0.6, 0.7, 1.0, 0.4));
         CommonSceneObject_ARMADILLO->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(0, 0, 0)) * glm::scale(glm::mat4(1.0), glm::vec3(0.01, 0.01, 0.01)));
         // we don't want it to individually render, so we don't attach it to the renderQueue
         // but instead, it's rendering is controlled by the DestructiveCSSceneObject
@@ -102,7 +102,7 @@ public:
         sceneObjects.push_back(CommonSceneObject_ARMADILLO);
         
         // the DestructiveCSSceneObject
-        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(armadillo), renderContext);
+        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(armadillo), TRANSPARENT, renderContext);
         destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
         destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
         sceneObjects.push_back(destructiveCSSceneObject);

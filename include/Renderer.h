@@ -201,7 +201,9 @@ class Renderer {
             }
         }
 
-
+        // TODO: probably need to implement a render pass logic here
+        // so that user can define the render pass order and the framebuffer will be automatically generated and switched
+        // glBindFramebuffer(GL_FRAMEBUFFER, 1); // use the default framebuffer
         // render pass
         std::vector<std::shared_ptr<RenderComponent>> & renderQueue = _scene.renderQueue;
         // render the scene using openGL rasterization pipeline

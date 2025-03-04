@@ -78,7 +78,7 @@ void main()
     vec4 baseColor = texColor * color;
     if(isBoundary == 1){
         discard;
-        baseColor *= vec4(1.5, 0.7, 0.7, 1.0);
+        //baseColor *= vec4(1.5, 0.7, 0.7, 0.3);
     }
 
     // ambient
