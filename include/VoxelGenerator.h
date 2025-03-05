@@ -28,7 +28,7 @@ public:
          return;
       }
       model = _model;
-      mesh = model->meshes[0];
+      meshes.push_back(model->meshes[0]);
       grid_size = _grid_size;
    }
     // it won't tick, because it does voxelization only during initialization
@@ -37,8 +37,8 @@ public:
       return;
    }
    void GenerateVoxelData() {
-      if(mesh == nullptr) {
-         std::cerr << "[VoxelGeneratorComponent]: mesh is nullptr" << std::endl;
+      if(meshes.size() == 0) {
+         std::cerr << "[VoxelGeneratorComponent]: no mesh detected" << std::endl;
          return;
       }
       // check the resolution, make sure three dimensions are the same
@@ -46,7 +46,7 @@ public:
          std::cerr << "[VoxelGeneratorComponent]: grid size is not cubic" << std::endl;
          return;
       }
-
+      GMesh *mesh = this->meshes[0];
       // generate voxel data
       // need to first get the bounding box of the mesh
       // then generate the voxel data from a normalized version of the mesh
@@ -131,8 +131,8 @@ public:
    */
    void GenerateEmbeddedMeshSurfaceData(){
       // assume the voxel data has been generated
-      if(mesh == nullptr) {
-         std::cerr << "[VoxelGeneratorComponent]: mesh is nullptr" << std::endl;
+      if(meshes.size() == 0) {
+         std::cerr << "[VoxelGeneratorComponent]: no mesh detected" << std::endl;
          return;
       }
       // check the resolution, make sure three dimensions are the same
@@ -141,7 +141,7 @@ public:
          return;
       }
 
-
+      GMesh *mesh = this->meshes[0];
       glm::vec3 boundingBox_min = mesh->AA;
       glm::vec3 boundingBox_max = mesh->BB;
       glm::vec3 boundingBox_size = boundingBox_max - boundingBox_min;
@@ -568,7 +568,7 @@ public:
 
 private:
 GModel * model;// the model to be voxelized, currently we only voxelized the model's first mesh
-GMesh * mesh;// the mesh to be voxelized
+std::vector<GMesh*> meshes;// the mesh to be voxelized
 vector3d<float> mVoxels;
 glm::ivec3 grid_size;
 vector3d<std::vector<pos_norm>> embeddedSurfaceMeshData;

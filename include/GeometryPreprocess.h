@@ -27,9 +27,28 @@ vector3d<float> imfill(const vector3d<float>& im)
 	}
 
     // adding only one seed is not enough, at least test all the boundary voxels
-	const glm::ivec3 seed(0, 0, 0);
-	std::queue<glm::ivec3> q;
-	q.push(seed);
+	// const glm::ivec3 seed(0, 0, 0);
+	// std::queue<glm::ivec3> q;
+	// q.push(seed);
+    std::queue<glm::ivec3> q;
+    for(int i = 0; i < im.size().x; i++)
+    for(int j = 0; j < im.size().y; j++)
+    {
+        q.push(glm::ivec3(i, j, 0));
+        q.push(glm::ivec3(i, j, im.size().z-1));
+    }
+    for(int i = 0; i < im.size().x; i++)
+    for(int k = 0; k < im.size().z; k++)
+    {
+        q.push(glm::ivec3(i, 0, k));
+        q.push(glm::ivec3(i, im.size().y-1, k));
+    }
+    for(int j = 0; j < im.size().y; j++)
+    for(int k = 0; k < im.size().z; k++)
+    {
+        q.push(glm::ivec3(0, j, k));
+        q.push(glm::ivec3(im.size().x-1, j, k));
+    }
 
 	while (!q.empty())
 	{
@@ -51,10 +70,10 @@ vector3d<float> imfill(const vector3d<float>& im)
 				}
 			}
 		}
-      else if(im.get(p) == 1.0f && filled.get(p) == 1.0f)
-      {
-         filled.set(p, 2.0f);
-      }
+        else if(im.get(p) == 1.0f && filled.get(p) == 1.0f)
+        {
+            filled.set(p, 2.0f);
+        }
 	}
 	return filled;
 }

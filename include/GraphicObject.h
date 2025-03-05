@@ -469,6 +469,10 @@ class GMesh : public GMVPObject {
 		    indices.insert(indices.end(), face.mIndices, face.mIndices + face.mNumIndices);
 		}
 
+		// expand the bounding box a little bit
+		AA -= glm::vec3(1e-4f);
+		BB += glm::vec3(1e-4f);
+
 		std::cout<<"[GMesh]: "<<positions.size()<<" vertices, "<<indices.size()<<" indices"<<std::endl;
 		std::cout<<"[GMesh]: AABB: "<<AA.x<<","<<AA.y<<","<<AA.z<<" "<<BB.x<<","<<BB.y<<","<<BB.z<<std::endl;
 
@@ -625,6 +629,9 @@ class GMesh : public GMVPObject {
 class GModel : public GMVPObject {
 	public:
 	std::vector<GMesh*> meshes;
+	// the AABB of the model
+	// is simply the union of all the AABB of the meshes
+	glm::vec3 AA, BB;
 	GModel(std::string const& path)
 	{
 		Assimp::Importer importer;
@@ -633,6 +640,9 @@ class GModel : public GMVPObject {
 		// However, now we use aiProcessPreset_TargetRealtime_Fast, which is faster and rendering is not what we care about anymore
 		const aiScene* scene = importer.ReadFile(path, aiProcessPreset_TargetRealtime_Fast | aiProcess_PreTransformVertices);
 		//const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals);
+
+		AA = glm::vec3(1e9, 1e9, 1e9);
+		BB = glm::vec3(-1e9, -1e9, -1e9);
 
 		if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
 			std::cerr << "ERROR::ASSIMP::" << importer.GetErrorString() << std::endl;
@@ -643,6 +653,8 @@ class GModel : public GMVPObject {
 			aiMesh* mesh = scene->mMeshes[i];
 			GMesh *m = new GMesh(mesh);
 			meshes.push_back(m);
+			AA = glm::min(AA, m->AA);
+			BB = glm::max(BB, m->BB);
 		}
 
 		std::cout<<"model loaded, mesh count: "<< meshes.size() <<std::endl;
