@@ -476,8 +476,6 @@ class GMesh : public GMVPObject {
 		std::cout<<"[GMesh]: "<<positions.size()<<" vertices, "<<indices.size()<<" indices"<<std::endl;
 		std::cout<<"[GMesh]: AABB: "<<AA.x<<","<<AA.y<<","<<AA.z<<" "<<BB.x<<","<<BB.y<<","<<BB.z<<std::endl;
 
-		
-
 		glGenVertexArrays(1, &VAO);
 		glGenBuffers(1, &VBO);
 		glGenBuffers(1, &EBO);
@@ -657,7 +655,7 @@ class GModel : public GMVPObject {
 			BB = glm::max(BB, m->BB);
 		}
 
-		std::cout<<"model loaded, mesh count: "<< meshes.size() <<std::endl;
+		std::cout<<"[GModel]: "<<"model loaded, mesh count: "<< meshes.size() << " AABB: "<<AA.x<<","<<AA.y<<","<<AA.z<<" "<<BB.x<<","<<BB.y<<","<<BB.z<<std::endl;
 		
 	}
 

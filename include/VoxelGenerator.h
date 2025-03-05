@@ -565,7 +565,7 @@ public:
    }
 
    // get the embedded mesh data
-   vector3d<std::vector<pos_norm>> getEmbeddedMeshData() {
+   vector3d<std::vector<pos_norm>> getEmbeddedSurfaceMeshData() {
       return embeddedSurfaceMeshData;
    }
 

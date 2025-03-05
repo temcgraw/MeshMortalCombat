@@ -126,30 +126,9 @@ struct EmbeddedVertex {
 class DestructiveCSComponent : public ComputeComponent {
 public:
     DestructiveCSComponent() {
-        //// ------------------------------------------------------------------------------------------------
-        //// 1. initialize particle buffers (ping-pong buffer)
-        //// simple case: 8 particles in a cube
-        //particles.push_back(Particle(glm::vec3(0.0f, 0.0f, 0.0f), 0.01781f, 1.0f));
-        //particles.push_back(Particle(glm::vec3(0.2f, 0.0f, 0.0f), 0.01781f, 1.0f));
-        //particles.push_back(Particle(glm::vec3(0.0f, 0.2f, 0.0f), 0.01781f, 1.0f));
-        //particles.push_back(Particle(glm::vec3(0.2f, 0.2f, 0.0f), 0.01781f, 1.0f));
-        //particles.push_back(Particle(glm::vec3(0.0f, 0.0f, 0.2f), 0.01781f, 1.0f));
-        //particles.push_back(Particle(glm::vec3(0.2f, 0.0f, 0.2f), 0.01781f, 1.0f));
-        //particles.push_back(Particle(glm::vec3(0.0f, 0.2f, 0.2f), 0.01781f, 1.0f));
-        //particles.push_back(Particle(glm::vec3(0.2f, 0.2f, 0.2f), 0.01781f, 1.0f));
-//
-//
-        //// add 100 random particles
-        //for (int i = 0; i < 35000; i++) {
-        //    float x = (rand() % 100) / 100.0f;
-        //    float y = (rand() % 100) / 100.0f;
-        //    float z = (rand() % 100) / 100.0f;
-        //    particles.push_back(Particle(glm::vec3(x, y, z), 0.01781f, 1.0f));
-        //}
-
 
     }
-    void initializeVoxels(const vector3d<float> &_voxels, const vector3d<std::vector<pos_norm>> & _embeddedMesh, const vector3d<std::vector<pos_norm>> & _embeddedVoxelMesh, glm::mat4 _modelMatrix = glm::mat4(1.0f)) {
+    void initializeVoxels(const vector3d<float> &_voxels, const vector3d<std::vector<pos_norm>> & _embeddedSurfaceMesh, const vector3d<std::vector<pos_norm>> & _embeddedVoxelMesh, glm::mat4 _modelMatrix = glm::mat4(1.0f)) {
         particles.clear();
         particles.shrink_to_fit();
         // for face constraints, we need to know the index of each voxel in voxel buffer
@@ -220,7 +199,7 @@ public:
                     // but sometimes some boundary voxels may not have surface mesh triangles after triangle culling
                     // so we also check whether the voxel is a boundary voxel
                     // surface voxels must be boundary voxels, but not all boundary voxels are surface voxels!
-                    if(_voxels.get(i,j,k) == 2.0f||_embeddedMesh.get(i,j,k).size() > 0){
+                    if(_voxels.get(i,j,k) == 2.0f||_embeddedSurfaceMesh.get(i,j,k).size() > 0){
                         flags[0] = 1;// indicate that this voxel is a surface voxel
                     }
                 }
@@ -283,14 +262,14 @@ public:
         }
         // ------------------------------------------------------------------------------------------------
         // 3. initialize the embedded mesh data (for rendering only)
-        embeddedMesh.clear();
-        embeddedMesh.shrink_to_fit();
+        embeddedSurfaceMesh.clear();
+        embeddedSurfaceMesh.shrink_to_fit();
         //EmbeddedTriangle
         for (int i = 0; i < _voxels.size().x; i++) {
         for (int j = 0; j < _voxels.size().y; j++) {
         for (int k = 0; k < _voxels.size().z; k++) {
             //if (_voxels.get(i, j, k) > 0.0f) {
-                for(const auto& vertex : _embeddedMesh.get(i,j,k)){
+                for(const auto& vertex : _embeddedSurfaceMesh.get(i,j,k)){
                     EmbeddedVertex et;
                     et.position = vertex.pos;
                     et.normal = vertex.norm;
@@ -298,13 +277,13 @@ public:
                     if(et.voxelIndex==-1){
                         std::cerr << "Error: [DestructiveCSComponent] voxel index is -1, I wrote bugs" << std::endl;
                     }
-                    embeddedMesh.push_back(et);
+                    embeddedSurfaceMesh.push_back(et);
                 }
             //}
         }
         }
         }
-        //std::cout<<"[DestructiveCSComponent] embedded mesh data size: "<<embeddedMesh.size()<<std::endl;
+        //std::cout<<"[DestructiveCSComponent] embedded mesh data size: "<<embeddedSurfaceMesh.size()<<std::endl;
         // !!! temp code for debugging
         embeddedVoxelMesh.clear();
         embeddedVoxelMesh.shrink_to_fit();
@@ -436,10 +415,10 @@ public:
 
         // ------------------------------------------------------------------------------------------------
         // 7. initialize embedded mesh buffer
-        glGenBuffers(1, &embeddedMeshBuffer);
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, embeddedMeshBuffer);
-        glBufferData(GL_SHADER_STORAGE_BUFFER, embeddedMesh.size() * sizeof(EmbeddedVertex), embeddedMesh.data(), GL_DYNAMIC_COPY);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, embeddedMeshBufferBindingPoint, embeddedMeshBuffer);
+        glGenBuffers(1, &embeddedSurfaceMeshBuffer);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, embeddedSurfaceMeshBuffer);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, embeddedSurfaceMesh.size() * sizeof(EmbeddedVertex), embeddedSurfaceMesh.data(), GL_DYNAMIC_COPY);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, embeddedMeshBufferBindingPoint, embeddedSurfaceMeshBuffer);
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
         // temporal voxel shit buffer
         glGenBuffers(1, &embeddedVoxelMeshBuffer);
@@ -662,7 +641,7 @@ public:
         return voxelConstraints.size();
     }
     int getNumEmbeddedVertices() const {
-        return embeddedMesh.size();
+        return embeddedSurfaceMesh.size();
     }
     int getNumEmbeddedVoxelVertices() const {
         return embeddedVoxelMesh.size();
@@ -671,7 +650,7 @@ public:
         return systemUBOBuffer;
     }
     GLuint getEmbeddedMeshBuffer() const {
-        return embeddedMeshBuffer;
+        return embeddedSurfaceMeshBuffer;
     }
     GLuint getEmbeddedMeshVoxelBuffer() const {
         return embeddedVoxelMeshBuffer;
@@ -689,10 +668,10 @@ private:
     vector3d<int> voxelID;
     std::vector<FaceConstraint> faceConstraints[3]; // faces have X, Y, Z three directions, so we need 3 buffers for partition
     // CPU side embedded mesh data
-    std::vector<EmbeddedVertex> embeddedMesh;// x1,y1,z1,x2,y2,z2,... for now
-    std::vector<EmbeddedVertex> embeddedVoxelMesh;// a temorary vertex buffer, in the future, we may want to merge it with embeddedMesh
+    std::vector<EmbeddedVertex> embeddedSurfaceMesh;// x1,y1,z1,x2,y2,z2,... for now
+    std::vector<EmbeddedVertex> embeddedVoxelMesh;// a temorary vertex buffer, in the future, we may want to merge it with embeddedSurfaceMesh
     // GPU side embedded mesh data, should be binded as SSBO
-    GLuint embeddedMeshBuffer;
+    GLuint embeddedSurfaceMeshBuffer;
     GLuint embeddedVoxelMeshBuffer;
     // GPU side voxel constraints and face constraints data, should be binded as SSBO
     GLuint voxelConstraintsBuffer;
@@ -754,7 +733,7 @@ public:
 
         debugShader = new Shader("shaders/debug_AABB.vert", "shaders/debug_AABB.frag");
         glGenVertexArrays(1, &debug_VAO); // openGL sometimes requires a VAO to draw something, even if we don't use it
-        targetMesh = nullptr;
+        rawMesh = nullptr;
     }
     void Render() override {
         // if the compute component is not set, we cannot render the particles
@@ -825,14 +804,14 @@ public:
 
 
         // --------------------original mesh rendering------------------------
-        if(targetMesh != nullptr && brenderOriginalMesh){
+        if(rawMesh != nullptr && brenderOriginalMesh){
             // render the target mesh
             // TODO: get rid of uniform context but use ubo context instead
             // if (context != nullptr) {
-            //     targetMesh->prepareDraw(context);
+            //     rawMesh->prepareDraw(context);
             // }
             glDisable(GL_DEPTH_TEST);
-            //targetMesh->draw();
+            rawMesh->draw();
             glEnable(GL_DEPTH_TEST);
         }
         // -------------------------------------------------------------------
@@ -841,7 +820,7 @@ public:
         this->computeComponent = _computeComponent;
     }
     void setTargetMesh(GMVPObject * _targetMesh) {
-        this->targetMesh = _targetMesh;
+        this->rawMesh = _targetMesh;
     }
 
     void setRenderParticles(bool b) {
@@ -870,7 +849,7 @@ private:
     Shader * skinShader;
     // also a debug shader to render the AABB stuff ... maybe not necessary
     Shader * debugShader;
-    GMVPObject * targetMesh;
+    GMVPObject * rawMesh;
     bool brenderOriginalMesh = true;
     // though we don't need any VBO or EBO for debug rendering, I found it is necessary to create a VAO
     // otherwise, the draw call will be automatically ignored by the OpenGL...
@@ -953,19 +932,19 @@ private:
 class DestructiveCSSceneObject : public RenderableSceneObject, public ComputeSceneObject {
 public:
     DestructiveCSSceneObject(std::shared_ptr<GModel> _targetMesh, enum renderQueue _renderPriority = OPAQUE, RenderContext * _context = nullptr) : RenderableSceneObject() {
-        this->targetMesh = _targetMesh;
-        if(targetMesh){
-            this->voxelGeneratorComponent = std::make_shared<VoxelGeneratorComponent>(targetMesh.get(),glm::ivec3(32,32,32));
+        this->rawMesh = _targetMesh;
+        if(rawMesh){
+            this->voxelGeneratorComponent = std::make_shared<VoxelGeneratorComponent>(rawMesh.get(),glm::ivec3(32,32,32));
             voxelGeneratorComponent->GenerateVoxelData();
             voxelGeneratorComponent->GenerateEmbeddedMeshSurfaceData();
             // get necessary data from the voxel generator component
             mVoxels = voxelGeneratorComponent->getVoxels();
-            embeddedMeshData = voxelGeneratorComponent->getEmbeddedMeshData();
+            embeddedSurfaceMeshData = voxelGeneratorComponent->getEmbeddedSurfaceMeshData();
             embeddedVoxelMeshData = voxelGeneratorComponent->getEmbeddedVoxelMeshData();
             
         }
         else{
-            std::cerr << "Error: [DestructiveCSSceneObject] failed to cast targetMesh" << std::endl;
+            std::cerr << "Error: [DestructiveCSSceneObject] failed to cast rawMesh" << std::endl;
         }
         
         // first we initialize the compute component
@@ -978,31 +957,36 @@ public:
         auto computeComponentDerived = std::dynamic_pointer_cast<DestructiveCSComponent>(this->computeComponent);
         if(computeComponentDerived){
             // calculate the transformation matrix of the voxel data(normalized voxel data is 0-1)
+            // note that this model matrix is not the common model matrix which converts the model from model space to world space
+            // but instead, it converts from voxel space to the world space
+            // so it's a combination of the model matrix of the target mesh and the inverse normalization matrix
+            // that's because later when we generate the voxel data in the destructive system, we need to convert the voxel data from (0-1)^3 range space to the world space
             glm::mat4 modelMatrix = glm::mat4(1.0f);
-            if(targetMesh){
+            if(rawMesh){
                 // 1. scale the voxel data to the target mesh's bounding box, translate the voxel data to the target mesh's center
-                glm::vec3 min = targetMesh->meshes[0]->AA;
-                glm::vec3 max = targetMesh->meshes[0]->BB;
+                glm::vec3 min = rawMesh->meshes[0]->AA;
+                glm::vec3 max = rawMesh->meshes[0]->BB;
                 glm::vec3 size = max - min;
                 // we use the largest axis to scale the voxel data, must be uniform scale because I don't want to handle non-uniform scale...
                 float maxAxis = std::max(std::max(size.x, size.y), size.z);
                 glm::vec3 scale = glm::vec3(maxAxis);
                 glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), scale);
                 glm::mat4 translateMatrix = glm::translate(glm::mat4(1.0f), min);
-                modelMatrix = translateMatrix * scaleMatrix;
-                std::cout<<"modelMatrix: "<<modelMatrix[0][0]<<" "<<modelMatrix[0][1]<<" "<<modelMatrix[0][2]<<" "<<modelMatrix[0][3]<<std::endl;
-                std::cout<<"modelMatrix: "<<modelMatrix[1][0]<<" "<<modelMatrix[1][1]<<" "<<modelMatrix[1][2]<<" "<<modelMatrix[1][3]<<std::endl;
-                std::cout<<"modelMatrix: "<<modelMatrix[2][0]<<" "<<modelMatrix[2][1]<<" "<<modelMatrix[2][2]<<" "<<modelMatrix[2][3]<<std::endl;
-                std::cout<<"modelMatrix: "<<modelMatrix[3][0]<<" "<<modelMatrix[3][1]<<" "<<modelMatrix[3][2]<<" "<<modelMatrix[3][3]<<std::endl;
+                // output the transformation matrix that convert the model from (0-1)^3 range space to original model local space
+                glm::mat4 inverseNormalizeMatrix = translateMatrix * scaleMatrix;
+                std::cout<<"inverseNormalizeMatrix: "<<modelMatrix[0][0]<<" "<<modelMatrix[0][1]<<" "<<modelMatrix[0][2]<<" "<<modelMatrix[0][3]<<std::endl;
+                std::cout<<"inverseNormalizeMatrix: "<<modelMatrix[1][0]<<" "<<modelMatrix[1][1]<<" "<<modelMatrix[1][2]<<" "<<modelMatrix[1][3]<<std::endl;
+                std::cout<<"inverseNormalizeMatrix: "<<modelMatrix[2][0]<<" "<<modelMatrix[2][1]<<" "<<modelMatrix[2][2]<<" "<<modelMatrix[2][3]<<std::endl;
+                std::cout<<"inverseNormalizeMatrix: "<<modelMatrix[3][0]<<" "<<modelMatrix[3][1]<<" "<<modelMatrix[3][2]<<" "<<modelMatrix[3][3]<<std::endl;
                 // 2. apply mesh's model matrix to the voxel data
-                modelMatrix = targetMesh->meshes[0]->model * modelMatrix;
+                modelMatrix = rawMesh->model * inverseNormalizeMatrix;
             }
            
             
 
             
             
-            computeComponentDerived->initializeVoxels(mVoxels, embeddedMeshData, embeddedVoxelMeshData, modelMatrix);
+            computeComponentDerived->initializeVoxels(mVoxels, embeddedSurfaceMeshData, embeddedVoxelMeshData, modelMatrix);
             computeComponentDerived->initializeBuffersAndShaders();
         }
         else{
@@ -1015,8 +999,8 @@ public:
             std::cerr << "Error: [DestructiveCSSceneObject] failed to cast renderComponent or computeComponent" << std::endl;
         }
         
-        if(renderComponentDerived && targetMesh){
-            renderComponentDerived->setTargetMesh(targetMesh.get());
+        if(renderComponentDerived && rawMesh){
+            renderComponentDerived->setTargetMesh(rawMesh.get());
         }
         else{
             std::cerr << "Error: [DestructiveCSSceneObject] failed to set target mesh" << std::endl;
@@ -1061,10 +1045,10 @@ protected:
     // it also has a render component, which is inherited from CommonSceneObject
     // and also a voxel render component, to initialize the voxel data and particle data
     std::shared_ptr<VoxelGeneratorComponent> voxelGeneratorComponent;
-    std::shared_ptr<GModel> targetMesh;// we assume the target mesh is a GModel with only one mesh currently
+    std::shared_ptr<GModel> rawMesh;// we assume the target mesh is a GModel with only one mesh currently
     // get them from VoxelGeneratorComponent
     vector3d<float> mVoxels;
-    vector3d<std::vector<pos_norm>> embeddedMeshData;
+    vector3d<std::vector<pos_norm>> embeddedSurfaceMeshData;
     vector3d<std::vector<pos_norm>> embeddedVoxelMeshData;
 };
 
