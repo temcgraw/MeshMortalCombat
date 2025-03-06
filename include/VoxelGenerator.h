@@ -153,9 +153,6 @@ public:
       float maxAxisLen = std::max(std::max(boundingBox_size.x, boundingBox_size.y), boundingBox_size.z);
       glm::vec3 scale = glm::vec3(maxAxisLen);
 
-      GMesh *mesh = model->meshes[0];
-      int num_triangles = mesh->indices.size() / 3;
-
       // check whether the voxel data has been generated
       if(mVoxels.size().x == 0) {
          std::cerr << "[VoxelGeneratorComponent]: voxel data has not been generated" << std::endl;
@@ -167,6 +164,7 @@ public:
       // for each mesh:
       for(int m = 0; m < model->meshes.size(); m++){
          GMesh *mesh = model->meshes[m];
+         int num_triangles = mesh->indices.size() / 3;
          // ----------surface mesh part: clip the triangles to the voxel's bounding box----------
          // for each triangle in mesh
          for (int t = 0; t < num_triangles; t++)
@@ -462,6 +460,9 @@ public:
          intersectionPoints[1] = intersectionPointsYdir;
          intersectionPoints[2] = intersectionPointsZdir;
 
+
+         // 3. for each voxel, find all of its intersection edges and in the end form the boundary voxel mesh triangles
+
          // for simplicity define parameter set before the loop
          // for each voxel, we need to process its six faces
          // and for each face, we need to process four edges
@@ -519,7 +520,7 @@ public:
                // then find the intersection edges from the intersection triangles on the face
                auto& voxelSurfaceData = embeddedSurfaceMeshData.getRef(i, j, k);
                int faceDirection = face/2; // face 0,1 is x direction, face 2,3 is y direction, face 4,5 is z direction
-               float faceDirectionValue = (face%2==0)?0.0f:1.0f; // face 0,2,4 is min face, face 1,3,5 is max face
+               float faceDirectionAxisOffsetValue = (face%2==0)?0.0f:1.0f; // face 0,2,4 is min face, face 1,3,5 is max face
                // find all the intersection edges
                for(int i=0;i<voxelSurfaceData.size();i+=3){
                   glm::vec3 p[3] = {voxelSurfaceData[i].pos, voxelSurfaceData[i+1].pos, voxelSurfaceData[i+2].pos};
@@ -527,7 +528,7 @@ public:
                   for(int e = 0; e < 3; e++) {
                      Edge edge = {p[e], p[(e+1)%3]};
                      // if both vertices are on the face
-                     if(abs(edge.start[faceDirection]-faceDirectionValue)<1e-6 && abs(edge.end[faceDirection]-faceDirectionValue)<1e-6) {
+                     if(abs(edge.start[faceDirection]-faceDirectionAxisOffsetValue)<1e-6 && abs(edge.end[faceDirection]-faceDirectionAxisOffsetValue)<1e-6) {
                         embeddedEdges[face].push_back(edge);
                      }
                   }

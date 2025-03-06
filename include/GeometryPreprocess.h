@@ -463,6 +463,7 @@ std::vector<Triangle> clipTriangleToUnitCube(const pos_norm& a, const pos_norm& 
 //   triangle - triangle structure std::array<pos_norm, 3> TODO: probably need uv attribute in the future
 //   t        - the distance from the ray origin to the intersection point（output parameter）
 //   u, v     - the interpolation weights of the intersection point on the triangle uv. Since we don't have uv attribute, we don't use it here
+//   normal   - the normal of the triangle at the intersection point. Still, not needed for this project
 // return true if the ray intersects the triangle, false otherwise
 bool rayIntersectsTriangle(const Ray& ray,
                            const Triangle& triangle,
@@ -716,7 +717,7 @@ std::array<glm::vec3, 3> correctTriangleOrientation(
 
 
 // using ear clipping algorithm to triangulate a polygon that lies on a fixed axis plane
-// the input polygon should be in 3D, and all vertices should lie on the same plane defined by faceDirection and faceDirectionValue
+// the input polygon should be in 3D, and all vertices should lie on the same plane defined by faceDirection
 // the faceDirection is 0, 1, or 2, indicating the fixed axis of the plane (e.g., x plane if faceDirection==0)
 // return a list of triangles, each triangle is a std::array<glm::vec3,3>
 std::vector<std::array<glm::vec3, 3>> triangulatePolygonFixed(std::vector<glm::vec3>& polygon, int faceDirection) {

@@ -810,9 +810,7 @@ public:
             // if (context != nullptr) {
             //     rawMesh->prepareDraw(context);
             // }
-            glDisable(GL_DEPTH_TEST);
             rawMesh->draw();
-            glEnable(GL_DEPTH_TEST);
         }
         // -------------------------------------------------------------------
     }
@@ -831,6 +829,9 @@ public:
     }
     void setRenderSkinMesh(bool b) {
         bRenderSkinMesh = b;
+    }
+    void setRenderOriginalMesh(bool b) {
+        brenderOriginalMesh = b;
     }
     
     
@@ -964,8 +965,8 @@ public:
             glm::mat4 modelMatrix = glm::mat4(1.0f);
             if(rawMesh){
                 // 1. scale the voxel data to the target mesh's bounding box, translate the voxel data to the target mesh's center
-                glm::vec3 min = rawMesh->meshes[0]->AA;
-                glm::vec3 max = rawMesh->meshes[0]->BB;
+                glm::vec3 min = rawMesh->AA;
+                glm::vec3 max = rawMesh->BB;
                 glm::vec3 size = max - min;
                 // we use the largest axis to scale the voxel data, must be uniform scale because I don't want to handle non-uniform scale...
                 float maxAxis = std::max(std::max(size.x, size.y), size.z);
@@ -1036,9 +1037,14 @@ public:
             renderComponentDerived->setRenderSkinMesh(b);
         }
     }
+    void setRenderOriginalMesh(bool b) {
+        auto renderComponentDerived = std::dynamic_pointer_cast<DestructiveRenderComponent>(this->renderComponent);
+        if(renderComponentDerived){
+            renderComponentDerived->setRenderOriginalMesh(b);
+        }
+    }
     void setComputeComponentActive(bool b) {
         this->computeComponent->active = b;
-        
     }
 
 protected:
@@ -1064,6 +1070,7 @@ public:
         systemRef->setRenderSkinMesh(bDrawMesh);
         systemRef->setRenderParticles(bDrawParticle);
         systemRef->setRenderVoxels(bDrawVoxel);
+        systemRef->setRenderOriginalMesh(bDrawOriginalMesh);
     }
     void drawWindow() override {
         if (!display) return;
@@ -1096,6 +1103,9 @@ public:
             if (ImGui::Checkbox("Draw Voxel", &bDrawVoxel)) {
                 systemRef->setRenderVoxels(bDrawVoxel);
             }
+            if (ImGui::Checkbox("Draw Original Mesh", &bDrawOriginalMesh)) {
+                systemRef->setRenderOriginalMesh(bDrawOriginalMesh);
+            }
             ImGui::End();
 		}
     }
@@ -1104,6 +1114,7 @@ private:
     bool bDrawMesh = true;
     bool bDrawParticle = false;
     bool bDrawVoxel = true;
+    bool bDrawOriginalMesh = false;
     int currentScene = 0;
     DestructiveCSSceneObject * systemRef;
 };
