@@ -6,7 +6,7 @@
 #include "CommonSceneObject.h"
 
 
-#include <queue>
+
 #include <unordered_set>
 
 #include "GeometryPreprocess.h"
@@ -224,7 +224,7 @@ public:
 
                      std::vector<pos_norm> embeddedTriangleVertices;
                      // 2. clipping the triangle to the voxel's bounding box
-                     std::vector<Triangle> clippedTriangles = clipTriangleToUnitCube(localTri[0], localTri[1], localTri[2]);
+                     std::vector<pos_norm_Triangle> clippedTriangles = clipTriangleToUnitCube(localTri[0], localTri[1], localTri[2]);
                      for(const auto& clippedTri : clippedTriangles) {
                         embeddedTriangleVertices.push_back(clippedTri[0]);
                         embeddedTriangleVertices.push_back(clippedTri[1]);
@@ -254,7 +254,7 @@ public:
          // ----------boundary voxel part: clip the voxels to the surface of the mesh----------
          // the hardest part...
          // 1. build a triangle uniform grid for fast triangle intersection test
-         std::vector<Triangle> meshTrianglesData; // the flattened triangle raw data in voxel space
+         std::vector<pos_norm_Triangle> meshTrianglesData; // the flattened triangle raw data in voxel space
          for(int t = 0; t < num_triangles; t++) {
             glm::uvec3 ix = glm::uvec3(mesh->indices[t * 3], mesh->indices[t * 3 + 1], mesh->indices[t * 3 + 2]);
             glm::vec4 po[3]; // the normalized vertex position between 0-1
@@ -277,7 +277,7 @@ public:
 
                
             }
-            Triangle tri = { { {pvox[0], pn[0]}, {pvox[1], pn[1]}, {pvox[2], pn[2]} } };
+            pos_norm_Triangle tri = { { {pvox[0], pn[0]}, {pvox[1], pn[1]}, {pvox[2], pn[2]} } };
             meshTrianglesData.push_back(tri);
          }
 
@@ -400,7 +400,7 @@ public:
             // for each ray, it might intersect with triangles in multiple voxels
             std::vector<glm::ivec3> relatedVoxelIndices;
             findRayRelatedVoxels(raysXdir[idx], relatedVoxelIndices);
-            std::vector<Triangle> triangles(0);
+            std::vector<pos_norm_Triangle> triangles(0);
             std::unordered_set<int> candidateTriangleIndices; // need to use set to avoid duplicate triangles
             for(const auto& voxelIdx : relatedVoxelIndices) {
                for(const auto& triIdx : triangleGrid.get(voxelIdx)) {
@@ -420,7 +420,7 @@ public:
             // for each ray, it might intersect with triangles in multiple voxels
             std::vector<glm::ivec3> relatedVoxelIndices;
             findRayRelatedVoxels(raysYdir[idx], relatedVoxelIndices);
-            std::vector<Triangle> triangles(0);
+            std::vector<pos_norm_Triangle> triangles(0);
             std::unordered_set<int> candidateTriangleIndices; // need to use set to avoid duplicate triangles
             for(const auto& voxelIdx : relatedVoxelIndices) {
                for(const auto& triIdx : triangleGrid.get(voxelIdx)) {
@@ -440,7 +440,7 @@ public:
             // for each ray, it might intersect with triangles in multiple voxels
             std::vector<glm::ivec3> relatedVoxelIndices;
             findRayRelatedVoxels(raysZdir[idx], relatedVoxelIndices);
-            std::vector<Triangle> triangles(0);
+            std::vector<pos_norm_Triangle> triangles(0);
             std::unordered_set<int> candidateTriangleIndices; // need to use set to avoid duplicate triangles
             for(const auto& voxelIdx : relatedVoxelIndices) {
                for(const auto& triIdx : triangleGrid.get(voxelIdx)) {

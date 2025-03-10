@@ -5,6 +5,8 @@
 
 #include "CommonSceneObject.h"
 #include "VoxelGenerator.h"
+#include "GPUTimer.h"
+
 
 #define particleCollisionMode_UPDATE_V_AND_X 0
 #define particleCollisionMode_COLLISION 1
@@ -21,7 +23,9 @@
 #define local_workgroup_size_x_vgs_voxel 256
 #define local_workgroup_size_x_vgs_face 64
 
-
+// if the timer get query immediately without delay, the system will be blocked and performance will be bad
+#define TimerBufferSize 3
+#define TimerDelayFrames (TimerBufferSize-1)
 
 // this is the particle struct for the destructive particle system
 // it is not only used for computing, but also for rendering
@@ -126,7 +130,13 @@ struct EmbeddedVertex {
 class DestructiveCSComponent : public ComputeComponent {
 public:
     DestructiveCSComponent() {
-
+        bool bPrintTimerInfo = true;
+        ComponentTimer = new AsyncGPUTimer("DestructiveCSComponent",bPrintTimerInfo,TimerDelayFrames);
+        ParticleCollisionTimer = new AsyncGPUTimer("ParticleCollision",bPrintTimerInfo,TimerDelayFrames);
+        ParticleUniformGridTimer = new AsyncGPUTimer("ParticleUniformGrid",bPrintTimerInfo,TimerDelayFrames);
+        ParticlePrefixSumTimer = new AsyncGPUTimer("ParticlePrefixSum",bPrintTimerInfo,TimerDelayFrames);
+        ParticleVGSFaceTimer = new AsyncGPUTimer("ParticleVGSFace",bPrintTimerInfo,TimerDelayFrames);
+        ParticleVGSVoxelTimer = new AsyncGPUTimer("ParticleVGSVoxel",bPrintTimerInfo,TimerDelayFrames);
     }
     void initializeVoxels(const vector3d<float> &_voxels, const vector3d<std::vector<pos_norm>> & _embeddedSurfaceMesh, const vector3d<std::vector<pos_norm>> & _embeddedVoxelMesh, glm::mat4 _modelMatrix = glm::mat4(1.0f)) {
         particles.clear();
@@ -215,8 +225,8 @@ public:
         // face constraints: each voxel has 6 face constraints, and every two adjacent voxels share a face constraint
         // we need to generate face constraints for each pair of adjacent voxels
         const glm::ivec3 grid_size = _voxels.size();
-        //std::vector<float> strainLimit({0.5f, -0.5f}); // strain limit for face constraints
-        std::vector<float> strainLimit({0.0f, -0.0f}); // strain limit for face constraints
+        std::vector<float> strainLimit({0.5f, -0.5f}); // strain limit for face constraints
+        //std::vector<float> strainLimit({0.0f, -0.0f}); // strain limit for face constraints
         //Create face constraints
         glm::ivec3 vox_ix;
         for (vox_ix.z = 0; vox_ix.z < grid_size.z; vox_ix.z++)
@@ -444,16 +454,22 @@ public:
     }
 
 
-
+    AsyncGPUTimer * ComponentTimer;
+    AsyncGPUTimer * ParticleCollisionTimer;
+    AsyncGPUTimer * ParticleUniformGridTimer;
+    AsyncGPUTimer * ParticlePrefixSumTimer;
+    AsyncGPUTimer * ParticleVGSFaceTimer;
+    AsyncGPUTimer * ParticleVGSVoxelTimer;
 
     void Compute() override {
         //return; // don't do anything here
-
-        for(int i = 0; i < 3; i++){
-            // the system needs multiple iterations to generate feasible results
+        ComponentTimer->Start();
+        for(int i = 0; i < substeps; i++){
+            // the system needs multiple iterations（substeps) to generate feasible results
             // ------------------------------------------------------------------------------------------------
             // ------------------------------------------------------------------------------------------------
             // 1. update particle position and velocity
+            ParticleCollisionTimer->Start();
             particleCollisionShader->use();
             // bind the particle buffer as SSBO for instance's positions
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, inputParticleBindingPoint, particleBuffers[0]);
@@ -466,10 +482,11 @@ public:
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
             // ping-pong the particle buffer
             pingPongParticleBuffer();
-
+            ParticleCollisionTimer->Stop();
 
             // ------------------------------------------------------------------------------------------------
             // 2. uniform grid update
+            ParticleUniformGridTimer->Start();
             particleUniformGridShader->use();
             // bind the particle buffer as SSBO for instance's positions
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, inputParticleBindingPoint, particleBuffers[0]);
@@ -495,6 +512,7 @@ public:
             glCopyNamedBufferSubData(ugridCountBuffer, ugridStartBuffer, 0, 0, SystemUBO.numCells * sizeof(int));
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
             // bind the start buffer and let shader calculate the prefix sum
+            ParticlePrefixSumTimer->Start();
             particlePrefixSumShader->use();
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, inputParticleBindingPoint, ugridStartBuffer);
             particlePrefixSumShader->setInt("uNumElements", SystemUBO.numCells);
@@ -534,7 +552,7 @@ public:
                 n = n * 2;
                 pass = pass - 1;
             }
-
+            ParticlePrefixSumTimer->Stop();
             // 2.3. reorder the particles based on the prefix sum (inside particle IDs into each cell)
             // again, clear the count buffer to zero
             clearBufferToZero(ugridCountBuffer);
@@ -550,7 +568,7 @@ public:
             glDispatchCompute((SystemUBO.numParticles / local_workgroup_size_x_common)+1, 1, 1);
             // wait for the compute shader to finish
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-
+            ParticleUniformGridTimer->Stop();
 
             // ------------------------------------------------------------------------------------------------
             // 3. particle collision
@@ -579,6 +597,7 @@ public:
             
 
             // 4.1 VGS on voxels
+            ParticleVGSVoxelTimer->Start();
             particleVGSVoxelShader->use();
             // bind the particle buffer as SSBO for instance's positions
             // no ping-pong buffer here since no read-write conflict, only mapping computation
@@ -594,7 +613,7 @@ public:
             // dispatch compute shader, for each voxel, we need 8 particles, but in shader, each thread handles 8 particles, so we need to divide the size by 8 and multiply by 8
             glDispatchCompute(((voxelConstraints.size()/8*8) / local_workgroup_size_x_vgs_voxel)+1, 1, 1);
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-            
+            ParticleVGSVoxelTimer->Stop();
             //std::cout<<"voxelConstraints.size(): "<<voxelConstraints.size()<<std::endl;
             //std::cout<<"faceConstraints[0].size(): "<<faceConstraints[0].size()<<std::endl;
             //std::cout<<"faceConstraints[1].size(): "<<faceConstraints[1].size()<<std::endl;
@@ -604,6 +623,7 @@ public:
 
 
             // 4.2 VGS on faces
+            ParticleVGSFaceTimer->Start();
             particleVGSFaceShader->use();
             // bind the particle buffer 0 as inout buffer
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, inputParticleBindingPoint, particleBuffers[0]);
@@ -620,11 +640,11 @@ public:
                 glDispatchCompute((faceConstraints[i].size() / local_workgroup_size_x_vgs_face)+1, 1, 1);
                 glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
             }
-
+            ParticleVGSFaceTimer->Stop();
 
             // ------------------------------------------------------------------------------------------------
         }
-        
+        ComponentTimer->Stop();
 
         return;
     }
@@ -639,6 +659,9 @@ public:
     }
     int getNumVoxels() const {
         return voxelConstraints.size();
+    }
+    int getNumFaces() const {
+        return faceConstraints[0].size() + faceConstraints[1].size() + faceConstraints[2].size();
     }
     int getNumEmbeddedVertices() const {
         return embeddedSurfaceMesh.size();
@@ -655,9 +678,16 @@ public:
     GLuint getEmbeddedMeshVoxelBuffer() const {
         return embeddedVoxelMeshBuffer;
     }
+    void setSubsteps(int _substeps){
+        substeps = _substeps;
+    }
+    int getSubsteps() const {
+        return substeps;
+    }
 
 private:
     // some data
+    int substeps = 3;
     // CPU side initial particle data
     std::vector<Particle> particles;
     // GPU side particle data, should be binded as SSBO
@@ -701,6 +731,8 @@ private:
         glClearNamedBufferData(buffer, GL_R32I, GL_RED_INTEGER, GL_INT, &zero);
     }
 
+
+
 public:
     // binding points for the compute shaders
     const GLuint systemUBOBindingPoint = 1; // 0 has been used by the camera UBO, so we use 1 here
@@ -729,13 +761,23 @@ public:
         voxelShader = new Shader("shaders/voxel.vert", "shaders/voxel.frag");
         // the voxel plus embedded mesh shader, used for rendering surface voxels of the mesh
         skinShader = new Shader("shaders/voxel_skin.vert", "shaders/voxel_skin.frag");
-
-
         debugShader = new Shader("shaders/debug_AABB.vert", "shaders/debug_AABB.frag");
         glGenVertexArrays(1, &debug_VAO); // openGL sometimes requires a VAO to draw something, even if we don't use it
         rawMesh = nullptr;
+
+        bool bPrintTimerInfo = false;
+        TotalRenderTimer = new AsyncGPUTimer("DestructiveRenderComponent",bPrintTimerInfo,TimerDelayFrames);
+        ParticleRenderTimer = new AsyncGPUTimer("ParticleRenderer",bPrintTimerInfo,TimerDelayFrames);
+        VoxelRenderTimer = new AsyncGPUTimer("VoxelRenderer",bPrintTimerInfo,TimerDelayFrames);
+        SkinMeshRenderTimer = new AsyncGPUTimer("SkinMeshRenderer",bPrintTimerInfo,TimerDelayFrames);
+
     }
+    AsyncGPUTimer * TotalRenderTimer;
+    AsyncGPUTimer * ParticleRenderTimer;
+    AsyncGPUTimer * VoxelRenderTimer;
+    AsyncGPUTimer * SkinMeshRenderTimer;
     void Render() override {
+        TotalRenderTimer->Start();
         // if the compute component is not set, we cannot render the particles
         if (computeComponent.expired()) {
             std::cout<<"ERROR: [DestructiveRenderComponent] compute component is expired"<<std::endl;
@@ -743,6 +785,7 @@ public:
         }
         // --------------------particle rendering--------------------------------
         if(bRenderParticles){
+            ParticleRenderTimer->Start();
             particleShader->use();
 		    glBindVertexArray(particle_VAO);
             // bind the particle buffer as SSBO for instance's positions
@@ -750,6 +793,7 @@ public:
             // instance rendering, use glDrawArraysInstanced
             glDrawElementsInstanced(GL_TRIANGLES, 1200, GL_UNSIGNED_INT, 0, computeComponent.lock()->getNumParticles());
 		    glBindVertexArray(0);
+            ParticleRenderTimer->Stop();
         }
         // use debug shader to render the boundary box of the system
         debugShader->use();
@@ -766,13 +810,17 @@ public:
         // -------------------------------------------------------------------
         // --------------------voxel rendering--------------------------------
         if(bRenderVoxels){
+            VoxelRenderTimer->Start();
             voxelShader->use();
+            voxelShader->setVec4("color", glm::vec4(0.8f, 0.5f, 0.7f, 1.0f));
+            voxelShader->setBool("renderBoundary", !bRenderSkinMesh);
             glBindVertexArray(debug_VAO);// nothing to do with the VAO, just to avoid the OpenGL error
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, computeComponent.lock()->inputParticleBindingPoint, computeComponent.lock()->getParticleBuffer()[0]);
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, computeComponent.lock()->voxelConstraintsBindingPoint, computeComponent.lock()->getVoxelConstraintsBuffer());
             // no instance rendering, just draw the voxel mesh by drawing a lot of vertices which are generated by reading the voxel data and particle data
             glDrawArrays(GL_TRIANGLES, 0, computeComponent.lock()->getNumVoxels() * 36);
             glBindVertexArray(0);
+            VoxelRenderTimer->Stop();
         }
         
 
@@ -780,6 +828,7 @@ public:
         // -------------------------------------------------------------------
         // --------------------skin mesh rendering----------------------------
         if(bRenderSkinMesh){
+            SkinMeshRenderTimer->Start();
             skinShader->use();
             
             glBindVertexArray(debug_VAO);// nothing to do with the VAO, just to avoid the OpenGL error
@@ -798,9 +847,8 @@ public:
             glDrawArrays(GL_TRIANGLES, 0, computeComponent.lock()->getNumEmbeddedVertices());
             
             glBindVertexArray(0);
+            SkinMeshRenderTimer->Stop();
         }
-
-
 
 
         // --------------------original mesh rendering------------------------
@@ -813,6 +861,7 @@ public:
             rawMesh->draw();
         }
         // -------------------------------------------------------------------
+        TotalRenderTimer->Stop();
     }
     void bindComputeComponent(std::shared_ptr<DestructiveCSComponent> _computeComponent) {
         this->computeComponent = _computeComponent;
@@ -954,9 +1003,9 @@ public:
         this->renderComponent = std::make_shared<DestructiveRenderComponent>(_context, _renderPriority);
         // computeComponent initializes the particle data
         // and the renderComponent uses the particle data to render the object
-        auto renderComponentDerived = std::dynamic_pointer_cast<DestructiveRenderComponent>(this->renderComponent);
-        auto computeComponentDerived = std::dynamic_pointer_cast<DestructiveCSComponent>(this->computeComponent);
-        if(computeComponentDerived){
+        this->DestructiveCompute = std::dynamic_pointer_cast<DestructiveCSComponent>(this->computeComponent);
+        this->DestructiveRender = std::dynamic_pointer_cast<DestructiveRenderComponent>(this->renderComponent);
+        if(DestructiveCompute){
             // calculate the transformation matrix of the voxel data(normalized voxel data is 0-1)
             // note that this model matrix is not the common model matrix which converts the model from model space to world space
             // but instead, it converts from voxel space to the world space
@@ -981,27 +1030,22 @@ public:
                 std::cout<<"inverseNormalizeMatrix: "<<modelMatrix[3][0]<<" "<<modelMatrix[3][1]<<" "<<modelMatrix[3][2]<<" "<<modelMatrix[3][3]<<std::endl;
                 // 2. apply mesh's model matrix to the voxel data
                 modelMatrix = rawMesh->model * inverseNormalizeMatrix;
-            }
-           
-            
-
-            
-            
-            computeComponentDerived->initializeVoxels(mVoxels, embeddedSurfaceMeshData, embeddedVoxelMeshData, modelMatrix);
-            computeComponentDerived->initializeBuffersAndShaders();
+            } 
+            DestructiveCompute->initializeVoxels(mVoxels, embeddedSurfaceMeshData, embeddedVoxelMeshData, modelMatrix);
+            DestructiveCompute->initializeBuffersAndShaders();
         }
         else{
             std::cerr << "Error: [DestructiveCSSceneObject] failed to cast computeComponent" << std::endl;
         }
-        if (renderComponentDerived && computeComponentDerived) {
-            renderComponentDerived->bindComputeComponent(computeComponentDerived);
+        if (DestructiveRender && DestructiveCompute) {
+            DestructiveRender->bindComputeComponent(DestructiveCompute);
         } 
         else {
             std::cerr << "Error: [DestructiveCSSceneObject] failed to cast renderComponent or computeComponent" << std::endl;
         }
         
-        if(renderComponentDerived && rawMesh){
-            renderComponentDerived->setTargetMesh(rawMesh.get());
+        if(DestructiveRender && rawMesh){
+            DestructiveRender->setTargetMesh(rawMesh.get());
         }
         else{
             std::cerr << "Error: [DestructiveCSSceneObject] failed to set target mesh" << std::endl;
@@ -1012,40 +1056,64 @@ public:
     }
 
     void reinitializeSystem() {
-        auto computeComponentDerived = std::dynamic_pointer_cast<DestructiveCSComponent>(this->computeComponent);
-        if(computeComponentDerived){
-            computeComponentDerived->reuploadBuffer();
+        if(DestructiveCompute){
+            DestructiveCompute->reuploadBuffer();
         }
     }
-
-
     void setRenderParticles(bool b) {
-        auto renderComponentDerived = std::dynamic_pointer_cast<DestructiveRenderComponent>(this->renderComponent);
-        if(renderComponentDerived){
-            renderComponentDerived->setRenderParticles(b);
+        if(DestructiveRender){
+            DestructiveRender->setRenderParticles(b);
         }
     }
     void setRenderVoxels(bool b) {
-        auto renderComponentDerived = std::dynamic_pointer_cast<DestructiveRenderComponent>(this->renderComponent);
-        if(renderComponentDerived){
-            renderComponentDerived->setRenderVoxels(b);
+        if(DestructiveRender){
+            DestructiveRender->setRenderVoxels(b);
         }
     }
     void setRenderSkinMesh(bool b) {
-        auto renderComponentDerived = std::dynamic_pointer_cast<DestructiveRenderComponent>(this->renderComponent);
-        if(renderComponentDerived){
-            renderComponentDerived->setRenderSkinMesh(b);
+        if(DestructiveRender){
+            DestructiveRender->setRenderSkinMesh(b);
         }
     }
     void setRenderOriginalMesh(bool b) {
-        auto renderComponentDerived = std::dynamic_pointer_cast<DestructiveRenderComponent>(this->renderComponent);
-        if(renderComponentDerived){
-            renderComponentDerived->setRenderOriginalMesh(b);
+        if(DestructiveRender){
+            DestructiveRender->setRenderOriginalMesh(b);
         }
     }
     void setComputeComponentActive(bool b) {
         this->computeComponent->active = b;
     }
+
+    int getNumParticles() {
+        if(DestructiveCompute){
+            return DestructiveCompute->getNumParticles();
+        }
+        return -1;
+    }
+    int getNumVoxels() {
+        if(DestructiveCompute){
+            return DestructiveCompute->getNumVoxels();
+        }
+        return -1;
+    }
+    int getNumFaces() {
+        if(DestructiveCompute){
+            return DestructiveCompute->getNumFaces();
+        }
+        return -1;
+    }
+    void setSubsteps(int _substeps){
+        if(DestructiveCompute){
+            DestructiveCompute->setSubsteps(_substeps);
+        }
+    }
+    int getSubsteps() {
+        if(DestructiveCompute){
+            return DestructiveCompute->getSubsteps();
+        }
+        return -1;
+    }
+
 
 protected:
     // it also has a render component, which is inherited from CommonSceneObject
@@ -1056,68 +1124,13 @@ protected:
     vector3d<float> mVoxels;
     vector3d<std::vector<pos_norm>> embeddedSurfaceMeshData;
     vector3d<std::vector<pos_norm>> embeddedVoxelMeshData;
-};
-
-
-
-#include "UIManager.h"
-// the UI for such system, I put it here
-class DestructiveCSUI_left : public UIWindow {
-public:
-    DestructiveCSUI_left(DestructiveCSSceneObject * _systemRef) {
-        systemRef = _systemRef;
-        systemRef->setComputeComponentActive(bSystemComputeGPU);
-        systemRef->setRenderSkinMesh(bDrawMesh);
-        systemRef->setRenderParticles(bDrawParticle);
-        systemRef->setRenderVoxels(bDrawVoxel);
-        systemRef->setRenderOriginalMesh(bDrawOriginalMesh);
-    }
-    void drawWindow() override {
-        if (!display) return;
-        const char* sceneNames[] = { "SCENE1", "SCENE2", "SCENE3", "SCENE4" };
-        ImGui::SetNextWindowPos(ImVec2(5, 10), ImGuiCond_Always);
-		ImGui::SetNextWindowSize(ImVec2(340, ImGui::GetIO().DisplaySize.y-20), ImGuiCond_Always);
-        if (ImGui::Begin("DestructiveSystem", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize)) {
-			ImGui::Text("XXX");
-            if (ImGui::Button("Reinitialize Scene")) {
-                // reinitialize the system
-                if(systemRef){
-                    systemRef->reinitializeSystem();
-                }
-                else{
-                    std::cerr << "Error: [DestructiveCSUI_left] systemRef is nullptr" << std::endl;
-                }
-            }
-            if (ImGui::Checkbox("GPU simulation", &bSystemComputeGPU)) {
-                systemRef->setComputeComponentActive(bSystemComputeGPU);
-            }
-            if (ImGui::Combo("Scene Selection", &currentScene, sceneNames, IM_ARRAYSIZE(sceneNames))) {
-
-            }
-            if (ImGui::Checkbox("Draw Mesh", &bDrawMesh)) {
-                systemRef->setRenderSkinMesh(bDrawMesh);
-            }
-            if (ImGui::Checkbox("Draw Particle", &bDrawParticle)) {
-                systemRef->setRenderParticles(bDrawParticle);
-            }
-            if (ImGui::Checkbox("Draw Voxel", &bDrawVoxel)) {
-                systemRef->setRenderVoxels(bDrawVoxel);
-            }
-            if (ImGui::Checkbox("Draw Original Mesh", &bDrawOriginalMesh)) {
-                systemRef->setRenderOriginalMesh(bDrawOriginalMesh);
-            }
-            ImGui::End();
-		}
-    }
 private:
-    bool bSystemComputeGPU = false;
-    bool bDrawMesh = true;
-    bool bDrawParticle = false;
-    bool bDrawVoxel = true;
-    bool bDrawOriginalMesh = false;
-    int currentScene = 0;
-    DestructiveCSSceneObject * systemRef;
+    std::shared_ptr<DestructiveCSComponent> DestructiveCompute;
+    std::shared_ptr<DestructiveRenderComponent> DestructiveRender;
 };
+
+
+
 
 
 

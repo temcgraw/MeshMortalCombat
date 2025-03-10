@@ -6,7 +6,7 @@
 #include "InputHandler.h"
 #include "UIManager.h"
 
-
+#include "DestructiveCSUI.h"
 
 
 int main() {
@@ -25,7 +25,10 @@ int main() {
     RenderContext * renderContext = renderer.context; // get the render context from the renderer
     // -----------------------------------------------------------------------------------------
     // ------------------------------ create Scene object --------------------------------------
-    Scene Scene(renderContext,SCENE1); // create Scene object, which contains all the objects in the Scene
+    SceneManager::GetInstance().setRenderContext(renderContext); // set the render context to the scene manager
+    // create Scene object, which contains all the objects in the Scene
+    SceneManager::GetInstance().switchScene(SCENE1); // switch to the initial scene
+    Scene *Scene = SceneManager::GetInstance().getScene();
     std::cout<<"scene created"<<std::endl;
     // -----------------------------------------------------------------------------------------
     // ------------------------------ create camera controller object --------------------------
@@ -66,26 +69,16 @@ int main() {
     // ------------------------------ create log window object ---------------------------------
     bool enable_scene_tick = false; // enable/disable ticking of scene objects
     LogWindow * logWindow = new LogWindow(frameRateMonitor, camera, &enable_scene_tick);
-    DestructiveCSSceneObject * destructiveCSSyetem = nullptr;
-    // try find the DestructiveCSSceneObject in the scene objects
-    for (SceneObject * sceneObject : Scene.sceneObjects) {
-        DestructiveCSSceneObject * destructiveCSSceneObject = dynamic_cast<DestructiveCSSceneObject*>(sceneObject);
-        if (destructiveCSSceneObject) {
-            destructiveCSSyetem = destructiveCSSceneObject;
-            break;
-        }
-    }
-    if (!destructiveCSSyetem) {
-        std::cerr << "Error: [main] failed to find DestructiveCSSceneObject in the scene objects" << std::endl;
-    }
 
-    DestructiveCSUI_left * destructiveCSUI_left = new DestructiveCSUI_left(destructiveCSSyetem);
+    // ------------------------------ create DestructiveCS UI -----------------------------------
+    DestructiveCSUI_left * destructiveCSUI_left = new DestructiveCSUI_left();
+    
+
+    // -----------------------------------------------------------------------------------------
     uiManager.RegisterWindow(logWindow); // register the log window to the UI manager
     uiManager.RegisterWindow(destructiveCSUI_left);
     // -----------------------------------------------------------------------------------------
-    // ------------------- get the list of scene objects from the scene ------------------------
-    // they will be ticked in the main loop (some will also be rendered in the rendering loop)
-    std::vector<SceneObject*> & sceneObjects = Scene.sceneObjects;
+
     
     // main loop
     while (!glfwWindowShouldClose(renderer.window))
@@ -106,6 +99,9 @@ int main() {
         inputHandler->processKeyboardInput(); // process input will be disabled in ray tracing state by disabling renderer's keyboard input
 
 
+        std::vector<SceneObject*> & sceneObjects = SceneManager::GetInstance().getSceneObjects();
+
+
         // Tick all the scene objects
         if (enable_scene_tick){
             for (SceneObject * sceneObject : sceneObjects) {
@@ -119,7 +115,7 @@ int main() {
         // -------------------------- rendering part of the main loop ------------------------------
 
         bool draw_imgui = true;
-        renderer.render(Scene,draw_imgui); // render the scene using openGL rasterization pipeline
+        renderer.render(*SceneManager::GetInstance().getScene(),draw_imgui); // render the scene using openGL rasterization pipeline
 
         // draw UIs
         if (draw_imgui) {

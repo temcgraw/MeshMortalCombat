@@ -27,6 +27,10 @@ public:
         return deltaTime;
     }
 
+    float getFrameDeltaTimeMS() const {
+        return deltaTime * 1000.0f;
+    }
+
     void reset() {
         deltaTime = 0.0;
         lastFrame = 0.0;

@@ -5,6 +5,7 @@
 #include <vector>
 #include <array>
 #include <cmath>
+#include <queue>
 #include <glm/glm.hpp>
 
 
@@ -317,7 +318,7 @@ struct pos_norm{
     glm::vec3 pos;
     glm::vec3 norm;
 };
-typedef std::array<pos_norm, 3> Triangle;
+typedef std::array<pos_norm, 3> pos_norm_Triangle;
 // a struct for edge definition, used in topological data structure
 struct Edge {
     glm::vec3 start;
@@ -421,8 +422,8 @@ pos_norm intersect_zmax(const pos_norm& v1, const pos_norm& v2) {
 // fan triangulation of the polygon
 // this function assumes the input polygon is convex
 // since the input triangle is convex, the output polygon is also convex, thus no worry about concave polygon
-std::vector<Triangle> triangulatePolygon(const std::vector<pos_norm>& poly) {
-    std::vector<Triangle> triangles;
+std::vector<pos_norm_Triangle> triangulatePolygon(const std::vector<pos_norm>& poly) {
+    std::vector<pos_norm_Triangle> triangles;
     if (poly.size() < 3)
         return triangles;
     // split the polygon into triangles by connecting the first vertex with each pair of adjacent vertices
@@ -433,7 +434,7 @@ std::vector<Triangle> triangulatePolygon(const std::vector<pos_norm>& poly) {
 }
 
 // clip a triangle to the unit cube [0, 1]^3
-std::vector<Triangle> clipTriangleToUnitCube(const pos_norm& a, const pos_norm& b, const pos_norm& c) {
+std::vector<pos_norm_Triangle> clipTriangleToUnitCube(const pos_norm& a, const pos_norm& b, const pos_norm& c) {
     std::vector<pos_norm> poly = { a, b, c };
 
     // sequentially clip the triangle to the 6 clip planes
@@ -447,7 +448,7 @@ std::vector<Triangle> clipTriangleToUnitCube(const pos_norm& a, const pos_norm& 
     // if the polygon is empty, return empty triangles
     // could happen if the triangle is completely outside the unit cube and only some vertices are on the clip planes
     if (poly.size() < 3)
-        return std::vector<Triangle>();
+        return std::vector<pos_norm_Triangle>();
 
     // fan triangulation of the polygon
     return triangulatePolygon(poly);
@@ -466,7 +467,7 @@ std::vector<Triangle> clipTriangleToUnitCube(const pos_norm& a, const pos_norm& 
 //   normal   - the normal of the triangle at the intersection point. Still, not needed for this project
 // return true if the ray intersects the triangle, false otherwise
 bool rayIntersectsTriangle(const Ray& ray,
-                           const Triangle& triangle,
+                           const pos_norm_Triangle& triangle,
                            float &t, float &u, float &v, glm::vec3& normal)
 {
     const float EPSILON = 1e-6f;
@@ -523,7 +524,7 @@ bool rayIntersectsTriangle(const Ray& ray,
 
 // input a set of triangles and a ray, return the intersection points of the ray with all triangles
 // note that the intersection points are not sorted, so you may need to sort them by distance to the ray origin if needed
-std::vector<glm::vec3> raycastTriangles(const std::vector<Triangle>& triangles,
+std::vector<glm::vec3> raycastTriangles(const std::vector<pos_norm_Triangle>& triangles,
                                         const Ray& ray)
 {
     std::vector<glm::vec3> intersections;
