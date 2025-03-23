@@ -480,7 +480,7 @@ public:
          // e.g.: x direction (direction = 0): int idx = j*(grid_size.z+1)+k;
          std::vector<std::pair<int, int>> indexCalculation = {{1, 2}, {0, 2}, {0, 1}};
          
-
+         std::vector<std::vector<pos_norm_Triangle>> outputOBJdata(grid_size.x);
          for (int i = 0; i < grid_size.x; i++)
          for (int j = 0; j < grid_size.y; j++)
          for (int k = 0; k < grid_size.z; k++)
@@ -554,10 +554,73 @@ public:
                for(int id = 0; id < embeddedTriangleVertices[face].size(); id++) {
                   voxelData.push_back(embeddedTriangleVertices[face][id]);
                }
+               if(face == 0) {
+                  // convert to 0-1 object scaled space, and export
+                  // for debug
+                  for(int id = 0; id < embeddedTriangleVertices[face].size(); id+=3) {
+                     if(id+2 >= embeddedTriangleVertices[face].size()) {
+                        break;
+                     }
+                     glm::vec3 pos1 = embeddedTriangleVertices[face][id].pos;
+                     pos1 = pos1 + glm::vec3(i, j, k);
+                     pos1 = pos1 / glm::vec3(grid_size);
+                     pos_norm pos_norm1 = {pos1, faceNormals[face]};
+                     glm::vec3 pos2 = embeddedTriangleVertices[face][id+1].pos;
+                     pos2 = pos2 + glm::vec3(i, j, k);
+                     pos2 = pos2 / glm::vec3(grid_size);
+                     pos_norm pos_norm2 = {pos2, faceNormals[face]};
+                     glm::vec3 pos3 = embeddedTriangleVertices[face][id+2].pos;
+                     pos3 = pos3 + glm::vec3(i, j, k);
+                     pos3 = pos3 / glm::vec3(grid_size);
+                     pos_norm pos_norm3 = {pos3, faceNormals[face]};
+                     pos_norm_Triangle tri = {pos_norm1, pos_norm2, pos_norm3};
+                     outputOBJdata[i].push_back(tri);
+                  }
+               }
             }
          }
+         // write the boundary voxel mesh data to obj file
+         writeObj(outputOBJdata, "boundaryVoxelMesh-X.obj");
       }
    }
+   void writeObj(const std::vector<std::vector<pos_norm_Triangle>>& triangles, const std::string& filename) {
+      std::ofstream out(filename);
+      if (!out.is_open()) {
+          std::cerr << "Error: Cannot open file " << filename << " for writing." << std::endl;
+          return;
+      }
+  
+      int vertexOffset = 0;
+  
+      for (int plane = 0; plane < triangles.size(); plane++) {
+          if (triangles[plane].empty()) {
+              continue;
+          }
+          
+          out << "o Plane." << plane << "\n";
+  
+          
+          for (const pos_norm_Triangle& tri : triangles[plane]) {
+              for (int i = 0; i < 3; ++i) {
+                  const glm::vec3& pos = tri[i].pos;
+                  out << "v " << pos.x << " " << pos.y << " " << pos.z << "\n";
+              }
+          }
+  
+          
+          int triangleCount = triangles[plane].size();
+          for (int i = 0; i < triangleCount; ++i) {
+              int baseIndex = vertexOffset + i * 3; 
+              out << "f " << (baseIndex + 1) << " " << (baseIndex + 2) << " " << (baseIndex + 3) << "\n";
+          }
+  
+          
+          vertexOffset += triangleCount * 3;
+      }
+  
+      out.close();
+      std::cout << "OBJ file written: " << filename << std::endl;
+  }
    
 
    // get a copy of the voxel data

@@ -94,7 +94,7 @@ public:
     void drawWindow() override {
         if (!display) return;
         ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 345, 10), ImGuiCond_Always);
-		ImGui::SetNextWindowSize(ImVec2(340, 170), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(340, 150), ImGuiCond_Always);
         if (ImGui::Begin("LOG", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize)) {
 
 			ImGui::Text("Average FPS: %.1f ", frameRateMonitor->getFPS()); ImGui::SameLine(); ImGui::Text("| %.1f ", frameRateMonitor->getAverageFPS());
@@ -103,16 +103,17 @@ public:
 			ImGui::Text("Camera DIR: %.3f %.3f %.3f", camera->Front[0], camera->Front[1], camera->Front[2]);
 			ImGui::Text("Camera FOV: %.3f", camera->Zoom);
             ImGui::Text("Device: %s", GPU_name);
-            if (*enableSceneTick) {
-                if (ImGui::Button("Disable Scene Tick")) {
-                    *enableSceneTick = false;
-                }
-            } 
-            else {
-                if (ImGui::Button("Enable Scene Tick")) {
-                    *enableSceneTick = true;
-                }
-            }
+            // Tick() is not used in this project, because all the logic is handled in compute shaders
+            //if (*enableSceneTick) {
+            //    if (ImGui::Button("Disable Scene Tick")) {
+            //        *enableSceneTick = false;
+            //    }
+            //} 
+            //else {
+            //    if (ImGui::Button("Enable Scene Tick")) {
+            //        *enableSceneTick = true;
+            //    }
+            //}
             ImGui::End();
 		}
     }

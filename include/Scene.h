@@ -108,18 +108,11 @@ public:
         // --------------------------------------------------------------------------------
         // probably need to refactor this part, it's not a good idea to put one object into another object
         // maybe use GModel instead of CommonSceneObject
-        // the armadillo we want to voxelize and destruct
-        GModel * armadillo = new GModel("resource/armtest1x1x1.obj");
-        CommonSceneObject * CommonSceneObject_ARMADILLO = new CommonSceneObject(armadillo,TRANSPARENT,renderContext);
-        CommonSceneObject_ARMADILLO->setMaterial(LAMBERTIAN, 0.0, glm::vec4(0.6, 0.7, 1.0, 0.4));
-        CommonSceneObject_ARMADILLO->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.5, -0.5)) * glm::scale(glm::mat4(1.0), glm::vec3(1,1,1)));
-        // we don't want it to individually render, so we don't attach it to the renderQueue
-        // but instead, it's rendering is controlled by the DestructiveCSSceneObject
-        //CommonSceneObject_ARMADILLO->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(CommonSceneObject_ARMADILLO);
-        
+        // the mesh we want to voxelize and destruct
+        GModel * inputMesh = new GModel("resource/stanford-bunny1x1x1.obj");
+        inputMesh->setModel(glm::scale(glm::mat4(1.0), glm::vec3(1.25)) *glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.25, -0.5)));
         // the DestructiveCSSceneObject
-        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(armadillo), TRANSPARENT, renderContext);
+        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(inputMesh), TRANSPARENT, renderContext);
         destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
         destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
         sceneObjects.push_back(destructiveCSSceneObject);
@@ -138,12 +131,9 @@ public:
         Skybox * skybox = new Skybox(_skybox);
         skybox->attachToSceneRenderList(renderQueue);
         sceneObjects.push_back(skybox);
-        GModel * armadillo = new GModel("resource/stanford-bunny1x1x1.obj");
-        CommonSceneObject * CommonSceneObject_ARMADILLO = new CommonSceneObject(armadillo,TRANSPARENT,renderContext);
-        CommonSceneObject_ARMADILLO->setMaterial(LAMBERTIAN, 0.0, glm::vec4(0.6, 0.7, 1.0, 0.4));
-        CommonSceneObject_ARMADILLO->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.5, -0.5)) * glm::scale(glm::mat4(1.0), glm::vec3(1,1,1)));
-        sceneObjects.push_back(CommonSceneObject_ARMADILLO);
-        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(armadillo), TRANSPARENT, renderContext);
+        GModel * inputMesh = new GModel("resource/armtest1x1x1.obj");
+        inputMesh->setModel(glm::scale(glm::mat4(1.0), glm::vec3(1.25)) *glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.25, -0.5)));
+        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(inputMesh), TRANSPARENT, renderContext);
         destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
         destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
         sceneObjects.push_back(destructiveCSSceneObject);
@@ -160,12 +150,9 @@ public:
         Skybox * skybox = new Skybox(_skybox);
         skybox->attachToSceneRenderList(renderQueue);
         sceneObjects.push_back(skybox);
-        GModel * armadillo = new GModel("resource/gummyBear1x1x1.obj");
-        CommonSceneObject * CommonSceneObject_ARMADILLO = new CommonSceneObject(armadillo,TRANSPARENT,renderContext);
-        CommonSceneObject_ARMADILLO->setMaterial(LAMBERTIAN, 0.0, glm::vec4(0.6, 0.7, 1.0, 0.4));
-        CommonSceneObject_ARMADILLO->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.5, -0.5)) * glm::scale(glm::mat4(1.0), glm::vec3(1,1,1)));
-        sceneObjects.push_back(CommonSceneObject_ARMADILLO);
-        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(armadillo), TRANSPARENT, renderContext);
+        GModel * inputMesh = new GModel("resource/gummyBear1x1x1.obj");
+        inputMesh->setModel(glm::scale(glm::mat4(1.0), glm::vec3(1.25)) *glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.25, -0.5)));
+        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(inputMesh), TRANSPARENT, renderContext);
         destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
         destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
         sceneObjects.push_back(destructiveCSSceneObject);
@@ -182,12 +169,9 @@ public:
         Skybox * skybox = new Skybox(_skybox);
         skybox->attachToSceneRenderList(renderQueue);
         sceneObjects.push_back(skybox);
-        GModel * armadillo = new GModel("resource/skyscraper1x1x1.obj");
-        CommonSceneObject * CommonSceneObject_ARMADILLO = new CommonSceneObject(armadillo,TRANSPARENT,renderContext);
-        CommonSceneObject_ARMADILLO->setMaterial(LAMBERTIAN, 0.0, glm::vec4(0.6, 0.7, 1.0, 0.4));
-        CommonSceneObject_ARMADILLO->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.5, -0.5)) * glm::scale(glm::mat4(1.0), glm::vec3(1,1,1)));
-        sceneObjects.push_back(CommonSceneObject_ARMADILLO);
-        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(armadillo), TRANSPARENT, renderContext);
+        GModel * inputMesh = new GModel("resource/skyscraper1x1x1.obj");
+        inputMesh->setModel(glm::scale(glm::mat4(1.0), glm::vec3(1.25)) *glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.25, -0.5)));
+        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(inputMesh), TRANSPARENT, renderContext);
         destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
         destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
         sceneObjects.push_back(destructiveCSSceneObject);
@@ -204,12 +188,9 @@ public:
         Skybox * skybox = new Skybox(_skybox);
         skybox->attachToSceneRenderList(renderQueue);
         sceneObjects.push_back(skybox);
-        GModel * armadillo = new GModel("resource/Teapot1x1x1.obj");
-        CommonSceneObject * CommonSceneObject_ARMADILLO = new CommonSceneObject(armadillo,TRANSPARENT,renderContext);
-        CommonSceneObject_ARMADILLO->setMaterial(LAMBERTIAN, 0.0, glm::vec4(0.6, 0.7, 1.0, 0.4));
-        CommonSceneObject_ARMADILLO->setModelMatrix(glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.5, -0.5)) * glm::scale(glm::mat4(1.0), glm::vec3(1,1,1)));
-        sceneObjects.push_back(CommonSceneObject_ARMADILLO);
-        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(armadillo), TRANSPARENT, renderContext);
+        GModel * inputMesh = new GModel("resource/Teapot1x1x1.obj");
+        inputMesh->setModel(glm::scale(glm::mat4(1.0), glm::vec3(1.25)) *glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.25, -0.5)));
+        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(inputMesh), TRANSPARENT, renderContext);
         destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
         destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
         sceneObjects.push_back(destructiveCSSceneObject);

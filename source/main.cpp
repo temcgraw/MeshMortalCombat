@@ -67,7 +67,7 @@ int main() {
     // very important to initialize imgui after you register the callbacks, otherwise imgui's callbacks will be overwritten
     uiManager.Initialize(renderer.window); // initialize the UI manager, it will also initialize the ImGui library
     // ------------------------------ create log window object ---------------------------------
-    bool enable_scene_tick = false; // enable/disable ticking of scene objects
+    bool enable_scene_tick = false; // enable/disable ticking of scene objects, no used in this project since all logic is handled in compute shaders
     LogWindow * logWindow = new LogWindow(frameRateMonitor, camera, &enable_scene_tick);
 
     // ------------------------------ create DestructiveCS UI -----------------------------------

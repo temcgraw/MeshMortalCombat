@@ -72,14 +72,16 @@ layout (std140, binding = kGridUboBinding) uniform DESTRUCTIVE_SYSTEM_DATA
     vec3 gridMin;
     vec3 gridMax;
     ivec3 gridRes;
-    vec3 cellSize;
+	vec3 cellSize;
     int maxCellsPerElement;
     vec4 wallConstraints[6];
     vec4 g;
     float dt;
     float c;
     float omega_collision; // collision stiffness
+	float Time;
 } systemUBO;
+
 
 ivec3 CellCoord(vec3 p)
 {

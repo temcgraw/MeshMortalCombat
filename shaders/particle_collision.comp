@@ -114,6 +114,7 @@ layout (std140, binding = kGridUboBinding) uniform DESTRUCTIVE_SYSTEM_DATA
     float dt;
     float c;
     float omega_collision; // collision stiffness
+	float Time;
 } systemUBO;
 
 
@@ -133,12 +134,20 @@ int Index(ivec3 coord)
 layout(location = 0) uniform int uMode=1; 
 
 //Force field
-layout(location = 2) uniform float uFieldW = 0.0f;
-layout(location = 3) uniform int uFieldMode = 0;
+layout(location = 2) uniform float uFieldW = 0.0f; // the weight of the force field
+layout(location = 3) uniform int uFieldMode = 1;
 layout(location = 5) uniform vec4 uForcePos = vec4(0.0, 0.0, 0.0, 1.0); //x,y,z,r
 
+
+
 //Sphere projectile
-layout(location = 4) uniform vec4 uProj = vec4(0.0); //x,y,z,r
+layout(location = 4) uniform vec4 uProj = vec4(0.0,0.0,0.0,0.0); //x,y,z,r
+//Box projectile
+layout(location = 6) uniform vec3 uBoxSize = vec3(0.0);
+layout(location = 7) uniform mat4 uBoxRot = mat4(1.0, 0.0, 0.0, 0.0,
+																0.0, 1.0, 0.0, 0.0,
+																0.0, 0.0, 1.0, 0.0,
+																0.0, 0.0, 0.0, 1.0);
 
 
 
@@ -151,7 +160,9 @@ void UpdateVandX(int ix);
 void SolveConstraintsGrid(int ix);
 
 vec3 WallCollision(in XpbdParticle pi, vec4 plane, inout FrictionConstraint friction);
-
+vec3 ProjectileCollision(in XpbdParticle pi);
+float sdBox(vec3 p, vec3 b);
+vec3 boxGradient(in vec3 p, in vec3 rad);
 
 void main()
 {
@@ -176,141 +187,142 @@ vec3 div_free(vec3 x, vec3 y, vec3 c, float e)
 	return P*c;
 }
 
+vec3 BitangentNoise4D(vec4 p);
 
-//vec3 vel_field(vec3 p)
-//{
-//	p = p-uForcePos.xyz;
-//	float w = smoothstep(uForcePos.w+0.05, uForcePos.w-0.05, length(p));
-//
-//	//None
-//	if (uFieldMode == 0)
-//	{
-//		return vec3(0.0);
-//	}
-//
-//	//explode
-//	if(uFieldMode == 1)
-//	{
-//		vec3 v = p;
-//		v = 0.15*w*v/(length(v)+1.0e-6f);
-//		return v;
-//	}
-//
-//	//spin
-//	if (uFieldMode == 2)
-//	{
-//		vec3 v = p;
-//		v.y = 0.02;
-//		v.xz = vec2(-v.z, v.x);
-//		v.xz = 0.03 * v.xz / (length(v) + 1.0e-6f);
-//		v += -0.001*p/(length(p) + 1.0e-6f);
-//		v = w*v;
-//		return v;
-//	}
-//
-//	//split x
-//	if (uFieldMode == 3)
-//	{
-//		vec3 v = vec3(p.x, 0.0, 0.0);
-//		float w_mid = 0.4 * smoothstep(0.0, 0.2, abs(p.x));
-//		v = w * w_mid * v / (length(v) + 1.0e-6f);
-//		return v;
-//	}
-//
-//	//split y
-//	if (uFieldMode == 4)
-//	{
-//		vec3 v = vec3(0.0, p.y, 0.0);
-//		float w_mid = 0.4 * smoothstep(0.0, 0.2, abs(p.y));
-//		v = w * w_mid * v / (length(v) + 1.0e-6f);
-//		return v;
-//	}
-//
-//	//split z
-//	if (uFieldMode == 5)
-//	{
-//		vec3 v = vec3(0.0, 0.0, p.z);
-//		float w_mid = 0.4 * smoothstep(0.0, 0.2, abs(p.z));
-//		v = w * w_mid * v / (length(v) + 1.0e-6f);
-//		return v;
-//	}
-//
-//	const float vortex_e = 9.0;
-//	const vec3 vortex_y = vec3(0.0, 0.25, 0.0);
-//	const float vortex_speed = 0.05;
-//
-//	//vortex x
-//	if (uFieldMode == 6)
-//	{
-//		return w * vortex_speed * div_free(p, vortex_y, vec3(0.5, 0.0, 0.0), vortex_e);
-//	}
-//
-//	//vortex y
-//	if (uFieldMode == 7)
-//	{
-//		return w * vortex_speed * div_free(p, vortex_y, vec3(0.0, 0.5, 0.0), vortex_e);
-//	}
-//
-//	//vortex z
-//	if (uFieldMode == 8)
-//	{
-//		return w * vortex_speed * div_free(p, vortex_y, vec3(0.0, 0.0, 0.5), vortex_e);
-//	}
-//
-//	//turb
-//	if (uFieldMode == 9)
-//	{
-//		vec3 v = 0.005 * BitangentNoise4D(vec4(1.5 * p, SceneUniforms.Time));
-//		v.y += 0.02;
-//		v = w * v;
-//		return v;
-//	}
-//
-//	//shear
-//	if (uFieldMode == 10)
-//	{
-//		vec3 v = 0.2*w*(2.0*smoothstep(-0.05, 0.05, p.x)-1.0)*vec3(0.2, 1.0, 0.0);
-//		return v;
-//	}
-//
-//	//else
-//	return vec3(0.0);
-//}
-//
-//vec3 static_vel_field(vec3 p)
-//{
-//	//stretch x
-//	if (uFieldMode == 11)
-//	{
-//		vec3 v = vec3(sign(p.x), 0.0, 0.0);
-//		v = 0.3 * v;
-//		return v;
-//	}
-//	//stretch y
-//	if (uFieldMode == 12)
-//	{
-//		vec3 v = vec3(0.0, sign(p.y), 0.0);
-//		v = 0.3 * v;
-//		return v;
-//	}
-//	//twist x
-//	if (uFieldMode == 13)
-//	{
-//		vec3 v = p;
-//		v.x = 0.2 * sign(p.x);
-//		v.yz = 2.0*vec2(-v.z, v.y) * sign(p.x);
-//		return v;
-//	}
-//	//twist y
-//	if (uFieldMode == 14)
-//	{
-//		vec3 v = p;
-//		v.y = 0.2*sign(p.y);
-//		v.xz = -2.0*vec2(-v.z, v.x) * sign(p.y);
-//		return v;
-//	}
-//	return vec3(0.0);
-//}
+vec3 vel_field(vec3 p)
+{
+	p = p-uForcePos.xyz;
+	float w = smoothstep(uForcePos.w+0.05, uForcePos.w-0.05, length(p));
+
+	//None
+	if (uFieldMode == 0)
+	{
+		return vec3(0.0);
+	}
+
+	//explode
+	if(uFieldMode == 1)
+	{
+		vec3 v = p;
+		v = 0.15*w*v/(length(v)+1.0e-6f);
+		return v;
+	}
+
+	//spin
+	if (uFieldMode == 2)
+	{
+		vec3 v = p;
+		v.y = 0.02;
+		v.xz = vec2(-v.z, v.x);
+		v.xz = 0.03 * v.xz / (length(v) + 1.0e-6f);
+		v += -0.001*p/(length(p) + 1.0e-6f);
+		v = w*v;
+		return v;
+	}
+
+	//split x
+	if (uFieldMode == 3)
+	{
+		vec3 v = vec3(p.x, 0.0, 0.0);
+		float w_mid = 0.4 * smoothstep(0.0, 0.2, abs(p.x));
+		v = w * w_mid * v / (length(v) + 1.0e-6f);
+		return v;
+	}
+
+	//split y
+	if (uFieldMode == 4)
+	{
+		vec3 v = vec3(0.0, p.y, 0.0);
+		float w_mid = 0.4 * smoothstep(0.0, 0.2, abs(p.y));
+		v = w * w_mid * v / (length(v) + 1.0e-6f);
+		return v;
+	}
+
+	//split z
+	if (uFieldMode == 5)
+	{
+		vec3 v = vec3(0.0, 0.0, p.z);
+		float w_mid = 0.4 * smoothstep(0.0, 0.2, abs(p.z));
+		v = w * w_mid * v / (length(v) + 1.0e-6f);
+		return v;
+	}
+
+	const float vortex_e = 9.0;
+	const vec3 vortex_y = vec3(0.0, 0.25, 0.0);
+	const float vortex_speed = 0.05;
+
+	//vortex x
+	if (uFieldMode == 6)
+	{
+		return w * vortex_speed * div_free(p, vortex_y, vec3(0.5, 0.0, 0.0), vortex_e);
+	}
+
+	//vortex y
+	if (uFieldMode == 7)
+	{
+		return w * vortex_speed * div_free(p, vortex_y, vec3(0.0, 0.5, 0.0), vortex_e);
+	}
+
+	//vortex z
+	if (uFieldMode == 8)
+	{
+		return w * vortex_speed * div_free(p, vortex_y, vec3(0.0, 0.0, 0.5), vortex_e);
+	}
+
+	//turb
+	if (uFieldMode == 9)
+	{
+		vec3 v = 0.005 * BitangentNoise4D(vec4(1.5 * p, systemUBO.Time));
+		v.y += 0.02;
+		v = w * v;
+		return v;
+	}
+
+	//shear
+	if (uFieldMode == 10)
+	{
+		vec3 v = 0.2*w*(2.0*smoothstep(-0.05, 0.05, p.x)-1.0)*vec3(0.2, 1.0, 0.0);
+		return v;
+	}
+
+	//else
+	return vec3(0.0);
+}
+
+vec3 static_vel_field(vec3 p)
+{
+	//stretch x
+	if (uFieldMode == 11)
+	{
+		vec3 v = vec3(sign(p.x), 0.0, 0.0);
+		v = 0.3 * v;
+		return v;
+	}
+	//stretch y
+	if (uFieldMode == 12)
+	{
+		vec3 v = vec3(0.0, sign(p.y), 0.0);
+		v = 0.3 * v;
+		return v;
+	}
+	//twist x
+	if (uFieldMode == 13)
+	{
+		vec3 v = p;
+		v.x = 0.2 * sign(p.x);
+		v.yz = 2.0*vec2(-v.z, v.y) * sign(p.x);
+		return v;
+	}
+	//twist y
+	if (uFieldMode == 14)
+	{
+		vec3 v = p;
+		v.y = 0.2*sign(p.y);
+		v.xz = -2.0*vec2(-v.z, v.x) * sign(p.y);
+		return v;
+	}
+	return vec3(0.0);
+}
 
 
 
@@ -377,21 +389,24 @@ void UpdateVandX(int ix)
 		pi.vel.xyz = vn + vt;
 	}
 
-	//Apply gravity and other external forces
+	// Apply gravity and other external forces
 	pi.xprev.xyz = pi.xpos.xyz;
+	// non static particles
 	if(wi > 0.0) 
 	{
-		pi.vel.xyz += systemUBO.g.xyz*systemUBO.dt;
-		//pi.vel.xyz += uFieldW*vel_field(pi.xpos.xyz);
+		pi.vel.xyz += systemUBO.g.xyz*systemUBO.dt;//gravity
+		pi.vel.xyz += uFieldW*vel_field(pi.xpos.xyz);
 		pi.vel.xyz = limit_len(pi.vel.xyz, GetRadius(pi)/systemUBO.dt); //limit velocity
 		pi.xpos.xyz += pi.vel.xyz*systemUBO.dt;
 	}
-//static external forces
-if(wi == 0.0)
-{
-	//pi.xpos.xyz += uFieldW * static_vel_field(pi.xpos.xyz) * systemUBO.dt;
-	pi.xprev.xyz = pi.xpos.xyz;
-}
+	// static external forces
+	// this happens when we grab some part the object and move it
+	// thus these static particles are not affected by gravity, and need additional processing
+	if(wi == 0.0)
+	{
+		pi.xpos.xyz += uFieldW * static_vel_field(pi.xpos.xyz) * systemUBO.dt;
+		pi.xprev.xyz = pi.xpos.xyz;
+	}
 
 	particles_out[ix] = pi;
 }
@@ -426,6 +441,8 @@ void SolveConstraints(int ix)
 	{
 		dx += WallCollision(pi, wall[i], friction);
 	}
+
+	dx += ProjectileCollision(pi);
 	
 	//Collision constraints
 	for(int jx=0; jx<systemUBO.numParticles; jx++)
@@ -489,6 +506,7 @@ void SolveConstraintsGrid(int ix)
 	//wall collisions
 	const vec4 wall[6] = systemUBO.wallConstraints;
 
+	dx += ProjectileCollision(pi);
 
 	//Environment constraints
 	for(int i=0; i<6; i++)
@@ -583,6 +601,51 @@ vec3 WallCollision(in XpbdParticle pi, vec4 plane, inout FrictionConstraint fric
 	return dx;
 }
 
+vec3 ProjectileCollision(in XpbdParticle pi)
+{
+	vec3 dx = vec3(0.0);
+	float ri = GetRadius(pi);
+	float wi = GetW(pi);
+
+	float rj = uProj.w;
+	if(rj>0.0) //do sphere collision
+	{
+		float wj = 0.1;
+
+		vec3 nij = pi.xpos.xyz - uProj.xyz;
+		float d = length(nij) + eps;
+		vec3 uij = nij / d; //actual sphere normal
+
+		float pen = ri + rj - d; //convention: penetration is positive when there is a collision
+		if (pen > 0.0)
+		{
+			float h = 0.5f*pen;
+			//separate
+			dx += wi * systemUBO.omega_collision * h * uij / (wi + wj + eps);
+		}
+	}
+
+	if(dot(uBoxSize, vec3(1.0))>0.0) //do box collision
+	{
+		mat3 M = mat3(uBoxRot);
+		float wj = 0.01;
+		vec3 p = transpose(M)*(pi.xpos.xyz - uBoxRot[3].xyz);
+		float sd = sdBox(p, uBoxSize);
+		float pen = ri-sd;//convention: penetration is positive when there is a collision
+		
+		if(pen>0.0)
+		{
+			vec3 uij = M*boxGradient(p, uBoxSize);
+			float h = 2.0*pen;
+			//separate
+			dx += wi * systemUBO.omega_collision * h * uij / (wi + wj + eps);
+		}
+		
+	}
+
+	return dx;
+}
+
 
 float maxcomp(vec3 v)
 {
@@ -594,3 +657,133 @@ vec3 msign(vec3 v)
 	return vec3(sign(v.x), sign(v.y), sign(v.z));
 }
 
+float sdBox(vec3 p, vec3 b)
+{
+	vec3 q = abs(p) - b;
+	return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+vec3 boxGradient(in vec3 p, in vec3 rad)
+{
+	vec3  d = abs(p) - rad;
+	vec3  s = sign(p);
+	float g = maxcomp(d);
+	return s * ((g > 0.0) ? normalize(max(d, 0.0)) :
+		step(d.yzx, d.xyz) * step(d.zxy, d.xyz));
+}
+
+
+
+//	--------------------------------------------------------------------
+//	Optimized implementation of 3D/4D bitangent noise.
+//	Based on stegu's simplex noise: https://github.com/stegu/webgl-noise.
+//	Contact : atyuwen@gmail.com
+//	Author : Yuwen Wu (https://atyuwen.github.io/)
+//	License : Distributed under the MIT License.
+//	--------------------------------------------------------------------
+
+// Permuted congruential generator (only top 16 bits are well shuffled).
+// References: 1. Mark Jarzynski and Marc Olano, "Hash Functions for GPU Rendering".
+//             2. UnrealEngine/Random.ush. https://github.com/EpicGames/UnrealEngine
+uvec2 _pcg3d16(uvec3 p)
+{
+	uvec3 v = p * 1664525u + 1013904223u;
+	v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+	v.x += v.y * v.z; v.y += v.z * v.x;
+	return v.xy;
+}
+uvec2 _pcg4d16(uvec4 p)
+{
+	uvec4 v = p * 1664525u + 1013904223u;
+	v.x += v.y * v.w; v.y += v.z * v.x; v.z += v.x * v.y; v.w += v.y * v.z;
+	v.x += v.y * v.w; v.y += v.z * v.x;
+	return v.xy;
+}
+
+// Get random gradient from hash value.
+vec3 _gradient3d(uint hash)
+{
+	vec3 g = vec3(uvec3(hash) & uvec3(0x80000, 0x40000, 0x20000));
+	return g * (1.0 / vec3(0x40000, 0x20000, 0x10000)) - 1.0;
+}
+vec4 _gradient4d(uint hash)
+{
+	vec4 g = vec4(uvec4(hash) & uvec4(0x80000, 0x40000, 0x20000, 0x10000));
+	return g * (1.0 / vec4(0x40000, 0x20000, 0x10000, 0x8000)) - 1.0;
+}
+
+// 4D Bitangent noise. Approximately 163 instruction slots used.
+// Assume p is in the range [-32768, 32767].
+vec3 BitangentNoise4D(vec4 p)
+{
+	const vec4 F4 = vec4(0.309016994374947451);
+	const vec4  C = vec4(0.138196601125011,  // (5 - sqrt(5))/20  G4
+		0.276393202250021,  // 2 * G4
+		0.414589803375032,  // 3 * G4
+		-0.447213595499958); // -1 + 4 * G4
+
+	// First corner
+	vec4 i = floor(p + dot(p, F4));
+	vec4 x0 = p - i + dot(i, C.xxxx);
+
+	// Other corners
+
+	// Rank sorting originally contributed by Bill Licea-Kane, AMD (formerly ATI)
+	vec4 i0;
+	vec3 isX = step(x0.yzw, x0.xxx);
+	vec3 isYZ = step(x0.zww, x0.yyz);
+	// i0.x = dot( isX, vec3( 1.0 ) );
+	i0.x = isX.x + isX.y + isX.z;
+	i0.yzw = 1.0 - isX;
+	// i0.y += dot( isYZ.xy, vec2( 1.0 ) );
+	i0.y += isYZ.x + isYZ.y;
+	i0.zw += 1.0 - isYZ.xy;
+	i0.z += isYZ.z;
+	i0.w += 1.0 - isYZ.z;
+
+	// i0 now contains the unique values 0,1,2,3 in each channel
+	vec4 i3 = clamp(i0, 0.0, 1.0);
+	vec4 i2 = clamp(i0 - 1.0, 0.0, 1.0);
+	vec4 i1 = clamp(i0 - 2.0, 0.0, 1.0);
+
+	// x0 = x0 - 0.0 + 0.0 * C.xxxx
+	// x1 = x0 - i1  + 1.0 * C.xxxx
+	// x2 = x0 - i2  + 2.0 * C.xxxx
+	// x3 = x0 - i3  + 3.0 * C.xxxx
+	// x4 = x0 - 1.0 + 4.0 * C.xxxx
+	vec4 x1 = x0 - i1 + C.xxxx;
+	vec4 x2 = x0 - i2 + C.yyyy;
+	vec4 x3 = x0 - i3 + C.zzzz;
+	vec4 x4 = x0 + C.wwww;
+
+	i = i + 32768.5;
+	uvec2 hash0 = _pcg4d16(uvec4(i));
+	uvec2 hash1 = _pcg4d16(uvec4(i + i1));
+	uvec2 hash2 = _pcg4d16(uvec4(i + i2));
+	uvec2 hash3 = _pcg4d16(uvec4(i + i3));
+	uvec2 hash4 = _pcg4d16(uvec4(i + 1.0));
+
+	vec4 p00 = _gradient4d(hash0.x); vec4 p01 = _gradient4d(hash0.y);
+	vec4 p10 = _gradient4d(hash1.x); vec4 p11 = _gradient4d(hash1.y);
+	vec4 p20 = _gradient4d(hash2.x); vec4 p21 = _gradient4d(hash2.y);
+	vec4 p30 = _gradient4d(hash3.x); vec4 p31 = _gradient4d(hash3.y);
+	vec4 p40 = _gradient4d(hash4.x); vec4 p41 = _gradient4d(hash4.y);
+
+	// Calculate noise gradients.
+	vec3 m0 = clamp(0.6 - vec3(dot(x0, x0), dot(x1, x1), dot(x2, x2)), 0.0, 1.0);
+	vec2 m1 = clamp(0.6 - vec2(dot(x3, x3), dot(x4, x4)), 0.0, 1.0);
+	vec3 m02 = m0 * m0; vec3 m03 = m02 * m0;
+	vec2 m12 = m1 * m1; vec2 m13 = m12 * m1;
+
+	vec3 temp0 = m02 * vec3(dot(p00, x0), dot(p10, x1), dot(p20, x2));
+	vec2 temp1 = m12 * vec2(dot(p30, x3), dot(p40, x4));
+	vec4 grad0 = -6.0 * (temp0.x * x0 + temp0.y * x1 + temp0.z * x2 + temp1.x * x3 + temp1.y * x4);
+	grad0 += m03.x * p00 + m03.y * p10 + m03.z * p20 + m13.x * p30 + m13.y * p40;
+
+	temp0 = m02 * vec3(dot(p01, x0), dot(p11, x1), dot(p21, x2));
+	temp1 = m12 * vec2(dot(p31, x3), dot(p41, x4));
+	vec4 grad1 = -6.0 * (temp0.x * x0 + temp0.y * x1 + temp0.z * x2 + temp1.x * x3 + temp1.y * x4);
+	grad1 += m03.x * p01 + m03.y * p11 + m03.z * p21 + m13.x * p31 + m13.y * p41;
+
+	// The cross products of two gradients is divergence free.
+	return cross(grad0.xyz, grad1.xyz) * 81.0;
+}

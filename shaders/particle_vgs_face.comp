@@ -35,7 +35,9 @@ layout (std140, binding = kGridUboBinding) uniform DESTRUCTIVE_SYSTEM_DATA
     float dt;
     float c;
     float omega_collision; // collision stiffness
+	float Time;
 } systemUBO;
+
 
 
 //TODO clean up

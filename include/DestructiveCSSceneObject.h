@@ -7,6 +7,9 @@
 #include "VoxelGenerator.h"
 #include "GPUTimer.h"
 
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/quaternion.hpp>
 
 #define particleCollisionMode_UPDATE_V_AND_X 0
 #define particleCollisionMode_COLLISION 1
@@ -112,6 +115,7 @@ struct alignas(16) DestructiveSystemUBO{
     alignas(4) float dt;                   // time step
     alignas(4) float c;                    // damping
     alignas(4) float omega_collision;      // collision omega
+    alignas(4) float Time;                 // current time
 };
 
 
@@ -130,7 +134,7 @@ struct EmbeddedVertex {
 class DestructiveCSComponent : public ComputeComponent {
 public:
     DestructiveCSComponent() {
-        bool bPrintTimerInfo = true;
+        bool bPrintTimerInfo = false;
         ComponentTimer = new AsyncGPUTimer("DestructiveCSComponent",bPrintTimerInfo,TimerDelayFrames);
         ParticleCollisionTimer = new AsyncGPUTimer("ParticleCollision",bPrintTimerInfo,TimerDelayFrames);
         ParticleUniformGridTimer = new AsyncGPUTimer("ParticleUniformGrid",bPrintTimerInfo,TimerDelayFrames);
@@ -353,6 +357,7 @@ public:
         SystemUBO.dt = 0.0015f;
         SystemUBO.c = 0.99f;
         SystemUBO.omega_collision = 0.90f;
+        SystemUBO.Time = 0.0f;
         // create the UBO
         glGenBuffers(1, &systemUBOBuffer);
         glBindBuffer(GL_UNIFORM_BUFFER, systemUBOBuffer);
@@ -437,11 +442,16 @@ public:
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, embeddedMeshBufferBindingPoint, embeddedVoxelMeshBuffer);
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
+        // ------------------------------------------------------------------------------------------------
+        // 8. initialize the make_static shader, used to set particle w as 0 by a pattern
+        makeStaticShader = new ComputeShader("shaders/particle_make_static.comp");
+
     }
 
     // ugrid related buffers do not need to be reuploaded for reinitialization
     // but particle buffers, voxel constraints buffer, and face constraints buffer need to be reuploaded
     void reuploadBuffer(){
+        SystemUBO.Time = 0.0f;
         // reupload particle buffers
         glNamedBufferSubData(particleBuffers[0], 0, particles.size() * sizeof(Particle), particles.data());
         glNamedBufferSubData(particleBuffers[1], 0, particles.size() * sizeof(Particle), particles.data());
@@ -465,6 +475,15 @@ public:
         //return; // don't do anything here
         ComponentTimer->Start();
         for(int i = 0; i < substeps; i++){
+            // update the UBO
+            SystemUBO.Time += SystemUBO.dt;
+            glBindBuffer(GL_UNIFORM_BUFFER, systemUBOBuffer);
+            glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(DestructiveSystemUBO), &SystemUBO);
+            glBindBuffer(GL_UNIFORM_BUFFER, 0);
+            // update projectile positions
+            updateProjectiles();
+            // ------------------------------------------------------------------------------------------------
+
             // the system needs multiple iterations（substeps) to generate feasible results
             // ------------------------------------------------------------------------------------------------
             // ------------------------------------------------------------------------------------------------
@@ -526,9 +545,6 @@ public:
             for (;;)
             {
                 int stride = 2 << pass;
-                //particlePrefixSumShader->SetUniform(mStrideLoc, stride); //STRIDE = 2, 4, 8, ...
-                //particlePrefixSumShader->SetGridSize(glm::ivec3(n, 1, 1));
-                //particlePrefixSumShader->Dispatch();
                 particlePrefixSumShader->setInt("stride", stride); //STRIDE = 2, 4, 8, ...
                 glDispatchCompute((n / local_workgroup_size_x_prefix_sum)+1, 1, 1);
                 if (mBarrierEnabled) glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
@@ -614,13 +630,6 @@ public:
             glDispatchCompute(((voxelConstraints.size()/8*8) / local_workgroup_size_x_vgs_voxel)+1, 1, 1);
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
             ParticleVGSVoxelTimer->Stop();
-            //std::cout<<"voxelConstraints.size(): "<<voxelConstraints.size()<<std::endl;
-            //std::cout<<"faceConstraints[0].size(): "<<faceConstraints[0].size()<<std::endl;
-            //std::cout<<"faceConstraints[1].size(): "<<faceConstraints[1].size()<<std::endl;
-            //std::cout<<"faceConstraints[2].size(): "<<faceConstraints[2].size()<<std::endl;
-            //std::cout<<"particles.size(): "<<particles.size()<<std::endl;
-
-
 
             // 4.2 VGS on faces
             ParticleVGSFaceTimer->Start();
@@ -648,6 +657,64 @@ public:
 
         return;
     }
+
+    void applyExternalForces(int forceType, float forceWeight){
+        // apply external forces to the particles
+        particleCollisionShader->use();
+        particleCollisionShader->setInt("uFieldMode", forceType);
+        particleCollisionShader->setFloat("uFieldW", forceWeight);
+        if(forceType == 11){ // strench X
+            setStaticParticles(1,0.125f);
+        }
+        if(forceType == 12){ // strench Y
+            setStaticParticles(2,0.125f);
+        }
+        if(forceType == 13){ // twist X
+            setStaticParticles(1,0.125f);
+        }
+        if(forceType == 14){ // twist Y
+            setStaticParticles(2,0.125f);
+        }
+        
+    }
+
+    // use compute shader to update the particle data, and set some particles as static particles
+    // this is used before we want to drag some part of the mesh since the dragged parts should not respond to any other forces
+    void setStaticParticles(int selectPattern, float patternParam = 0.1f){
+        // pattern 0 do nothing
+        // pattern 1 the particles that has |x| < patternParam will be set as static particles
+        // pattern 2 the particles that has |y| < patternParam will be set as static particles
+        if(selectPattern == 0){
+            return;
+        }
+        else if(selectPattern == 1){
+            makeStaticShader->use();
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, inputParticleBindingPoint, particleBuffers[0]);
+            makeStaticShader->setInt("selectPattern", selectPattern);
+            makeStaticShader->setFloat("PatternParam", patternParam);
+            glDispatchCompute((SystemUBO.numParticles / local_workgroup_size_x_common)+1, 1, 1);
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+        }
+        else if(selectPattern == 2){
+            makeStaticShader->use();
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, inputParticleBindingPoint, particleBuffers[0]);
+            makeStaticShader->setInt("selectPattern", selectPattern);
+            makeStaticShader->setFloat("PatternParam", patternParam);
+            glDispatchCompute((SystemUBO.numParticles / local_workgroup_size_x_common)+1, 1, 1);
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+        }
+
+    }
+
+    void setDT(float dt){
+        SystemUBO.dt = dt;
+        glBindBuffer(GL_UNIFORM_BUFFER, systemUBOBuffer);
+        glBufferSubData(GL_UNIFORM_BUFFER, offsetof(DestructiveSystemUBO, dt), sizeof(float), &dt);
+        glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    }
+
+
+
     const std::vector<GLuint> & getParticleBuffer() const{
         return particleBuffers;
     }
@@ -683,6 +750,17 @@ public:
     }
     int getSubsteps() const {
         return substeps;
+    }
+
+    glm::vec4 getSphereProjectilePosAndRadius(){
+        return glm::vec4(mSpherePos, mSphereRadius);
+    }
+    std::pair<glm::mat4, glm::vec3> getBoxProjectileTransAndSize(){
+        return std::make_pair(mBoxTrans, mBoxSize);
+    }
+
+    void setProjectileType(int type){
+        projectileType = type;
     }
 
 private:
@@ -721,6 +799,13 @@ private:
     ComputeShader * particleUniformGridShader;
     ComputeShader * particleVGSFaceShader;
     ComputeShader * particleVGSVoxelShader;
+    ComputeShader * makeStaticShader;
+
+    int projectileType = 0; // 0 means no projectile, 1 means sphere-linear, 2 means box-blender
+    glm::vec3 mSpherePos = glm::vec3(0.0f, -0.125f, 0.0f);
+    float mSphereRadius = 0.0f; // 0 means not activated
+    glm::mat4 mBoxTrans = glm::mat4(1.0f);
+    glm::vec3 mBoxSize = glm::vec3(0.0f, 0.0f, 0.0f); // 0 means not activated
 
     void pingPongParticleBuffer() {
         std::swap(particleBuffers[0], particleBuffers[1]);
@@ -731,6 +816,44 @@ private:
         glClearNamedBufferData(buffer, GL_R32I, GL_RED_INTEGER, GL_INT, &zero);
     }
 
+    void updateProjectiles(){
+        if(projectileType == 0){
+            mSphereRadius = 0.0f;
+            mBoxSize = glm::vec3(0.0f, 0.0f, 0.0f);
+            return;
+        }
+        if(projectileType==1){// linear ball 
+            mSpherePos.z = sin(5.0f * SystemUBO.Time+1.0f);
+            mSphereRadius = 0.25f;
+        }
+        else{
+            mSphereRadius = 0.0f;
+        }
+        if(projectileType==2){// blender
+            mBoxTrans = glm::rotate(glm::translate(
+                glm::mat4(1.0f), glm::vec3(0.0f, -0.7f, 0.0f)
+            ), 10.1f * SystemUBO.Time, glm::vec3(0.0f, 1.0f, 0.0f));
+            mBoxSize = glm::vec3(0.15f, 0.03f, 0.7f);
+        }
+        else{
+            mBoxSize = glm::vec3(0.0f, 0.0f, 0.0f);
+        }
+        
+        updateSphereProjectile(mSpherePos, mSphereRadius);
+        updateBoxProjectile(mBoxTrans, mBoxSize);
+    }
+
+    void updateSphereProjectile(glm::vec3 center, float radius){
+        particleCollisionShader->use();
+        particleCollisionShader->setVec4("uProj", glm::vec4(center, radius));
+    }
+
+    void updateBoxProjectile(glm::mat4 transformationMatrix, glm::vec3 size){
+        particleCollisionShader->use();
+        particleCollisionShader->setVec3("uBoxSize", size);
+        particleCollisionShader->setMat4("uBoxRot", transformationMatrix);
+
+    }
 
 
 public:
@@ -764,7 +887,13 @@ public:
         debugShader = new Shader("shaders/debug_AABB.vert", "shaders/debug_AABB.frag");
         glGenVertexArrays(1, &debug_VAO); // openGL sometimes requires a VAO to draw something, even if we don't use it
         rawMesh = nullptr;
+        // initialize projectile shaders
+        // currently just use common object shader
+        ProjectileShader = new Shader("shaders/object_shader.vert", "shaders/object_shader.frag");
 
+
+
+        // initialize the timers
         bool bPrintTimerInfo = false;
         TotalRenderTimer = new AsyncGPUTimer("DestructiveRenderComponent",bPrintTimerInfo,TimerDelayFrames);
         ParticleRenderTimer = new AsyncGPUTimer("ParticleRenderer",bPrintTimerInfo,TimerDelayFrames);
@@ -861,6 +990,37 @@ public:
             rawMesh->draw();
         }
         // -------------------------------------------------------------------
+
+        // ------------------projectile rendering-----------------------------
+        // render the sphere projectile
+        glm::vec4 spherePosAndRadius = computeComponent.lock()->getSphereProjectilePosAndRadius();
+        if(spherePosAndRadius.w > 0.0f){
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, glm::vec3(spherePosAndRadius));
+            model = glm::scale(model, glm::vec3(spherePosAndRadius.w));
+            ProjectileShader->use();
+            ProjectileShader->setMat4("model", model);
+            ProjectileShader->setVec4("color", glm::vec4(0.7f, 0.7f, 0.3f, 1.0f));
+            glBindVertexArray(sphere_VAO);
+            glDrawElements(GL_TRIANGLES, 1200, GL_UNSIGNED_INT, 0);
+            glBindVertexArray(0);
+        }
+        // render the box projectile
+        std::pair<glm::mat4, glm::vec3> boxTransAndSize = computeComponent.lock()->getBoxProjectileTransAndSize();
+        if(boxTransAndSize.second != glm::vec3(0.0f, 0.0f, 0.0f)){
+            glm::mat4 model = boxTransAndSize.first;
+            model = glm::scale(model, boxTransAndSize.second);
+            ProjectileShader->use();
+            ProjectileShader->setMat4("model", model);
+            ProjectileShader->setVec4("color", glm::vec4(0.7f, 0.7f, 0.7f, 1.0f));
+            glBindVertexArray(cube_VAO);
+            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+            glBindVertexArray(0);
+        }
+
+
+
+
         TotalRenderTimer->Stop();
     }
     void bindComputeComponent(std::shared_ptr<DestructiveCSComponent> _computeComponent) {
@@ -890,7 +1050,7 @@ private:
     std::weak_ptr<DestructiveCSComponent> computeComponent;
     // we use instancing to render the particles
     // but we still need to use a VAO, VBO, EBO to store the particle mesh data
-    GLuint particle_VAO, particle_VBO, particle_EBO;
+    GLuint particle_VAO, particle_VBO, particle_EBO, sphere_VAO, cube_VAO, cube_VBO, cube_EBO;
     // we also need a shader to render the particles
     Shader * particleShader;
     // and a shader to optionally render the voxels via particle data
@@ -899,6 +1059,8 @@ private:
     Shader * skinShader;
     // also a debug shader to render the AABB stuff ... maybe not necessary
     Shader * debugShader;
+    // also shaders for projectiles
+    Shader * ProjectileShader;
     GMVPObject * rawMesh;
     bool brenderOriginalMesh = true;
     // though we don't need any VBO or EBO for debug rendering, I found it is necessary to create a VAO
@@ -972,6 +1134,98 @@ private:
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, particle_EBO); // bind EBO
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(GLuint) * sphereIndices.size(), sphereIndices.data(), GL_STATIC_DRAW); // copy the index data to EBO
 		glBindVertexArray(0);
+        // also, the sphere projectile shader will use this VBO and EBO
+        glGenVertexArrays(1, &sphere_VAO);
+        glBindVertexArray(sphere_VAO);
+        glBindBuffer(GL_ARRAY_BUFFER, particle_VBO);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0); // set vertex attribute pointers: position
+		glEnableVertexAttribArray(0); // activate vertex attribute
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float))); // set vertex attribute pointers: normal
+		glEnableVertexAttribArray(1); // activate vertex attribute
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float))); // set vertex attribute pointers: uv
+		glEnableVertexAttribArray(2); // activate vertex attribute
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, particle_EBO); // bind EBO
+        glBindVertexArray(0);
+        // then is the cube buffer for box projectile
+        // the cube is centered at the origin, and the size is 2.0f
+        // it has to be like this, since vertices with same position but different normals and uvs are not allowed in the same VBO
+        std::vector<GLfloat> cubeVertices = {
+            // -------- Face 1: bottom 
+            // Triangle 1
+            1.0f, -1.0f, -1.0f,    0.0f, -1.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn1
+            1.0f, -1.0f,  1.0f,    0.0f, -1.0f, 0.0f,    1.0f, 0.0f, // v2, vt2, vn1
+            -1.0f, -1.0f,  1.0f,    0.0f, -1.0f, 0.0f,    0.0f, 0.0f, // v3, vt3, vn1
+            // Triangle 2
+            1.0f, -1.0f, -1.0f,    0.0f, -1.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn1
+            -1.0f, -1.0f,  1.0f,    0.0f, -1.0f, 0.0f,    0.0f, 0.0f, // v3, vt3, vn1
+            -1.0f, -1.0f, -1.0f,    0.0f, -1.0f, 0.0f,    0.0f, 1.0f, // v4, vt4, vn1
+            // -------- Face 2: top
+            // Triangle 1
+            1.0f,  1.0f, -1.0f,    0.0f,  1.0f, 0.0f,    1.0f, 1.0f, // v5, vt1, vn2
+            -1.0f,  1.0f, -1.0f,    0.0f,  1.0f, 0.0f,    0.0f, 1.0f, // v8, vt4, vn2
+            -1.0f,  1.0f,  1.0f,    0.0f,  1.0f, 0.0f,    0.0f, 0.0f, // v7, vt3, vn2
+            // Triangle 2
+            1.0f,  1.0f, -1.0f,    0.0f,  1.0f, 0.0f,    1.0f, 1.0f, // v5, vt1, vn2
+            -1.0f,  1.0f,  1.0f,    0.0f,  1.0f, 0.0f,    0.0f, 0.0f, // v7, vt3, vn2
+            1.0f,  1.0f,  1.0f,    0.0f,  1.0f, 0.0f,    1.0f, 0.0f, // v6, vt2, vn2
+            // -------- Face 3: right
+            // Triangle 1
+            1.0f, -1.0f, -1.0f,    1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn3
+            1.0f,  1.0f, -1.0f,    1.0f,  0.0f, 0.0f,    1.0f, 0.0f, // v5, vt2, vn3
+            1.0f,  1.0f,  1.0f,    1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v6, vt3, vn3
+            // Triangle 2
+            1.0f, -1.0f, -1.0f,    1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn3
+            1.0f,  1.0f,  1.0f,    1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v6, vt3, vn3
+            1.0f, -1.0f,  1.0f,    1.0f,  0.0f, 0.0f,    0.0f, 1.0f, // v2, vt4, vn3
+            // -------- Face 4: front
+            // Triangle 1
+            1.0f, -1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    1.0f, 1.0f, // v2, vt1, vn4
+            1.0f,  1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    1.0f, 0.0f, // v6, vt2, vn4
+            -1.0f,  1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    0.0f, 0.0f, // v7, vt3, vn4
+            // Triangle 2
+            1.0f, -1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    1.0f, 1.0f, // v2, vt1, vn4
+            -1.0f,  1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    0.0f, 0.0f, // v7, vt3, vn4
+            -1.0f, -1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    0.0f, 1.0f, // v3, vt4, vn4
+            // -------- Face 5: left
+            // Triangle 1
+            -1.0f, -1.0f,  1.0f,   -1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v3, vt1, vn5
+            -1.0f,  1.0f,  1.0f,   -1.0f,  0.0f, 0.0f,    1.0f, 0.0f, // v7, vt2, vn5
+            -1.0f,  1.0f, -1.0f,   -1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v8, vt3, vn5
+            // Triangle 2
+            -1.0f, -1.0f,  1.0f,   -1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v3, vt1, vn5
+            -1.0f,  1.0f, -1.0f,   -1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v8, vt3, vn5
+            -1.0f, -1.0f, -1.0f,   -1.0f,  0.0f, 0.0f,    0.0f, 1.0f, // v4, vt4, vn5
+            // -------- Face 6: back
+            // Triangle 1
+            -1.0f, -1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   1.0f, 1.0f, // v4, vt1, vn6
+            -1.0f,  1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   1.0f, 0.0f, // v8, vt2, vn6
+            1.0f,  1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   0.0f, 0.0f, // v5, vt3, vn6
+            // Triangle 2
+            -1.0f, -1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   1.0f, 1.0f, // v4, vt1, vn6
+            1.0f,  1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   0.0f, 0.0f, // v5, vt3, vn6
+            1.0f, -1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   0.0f, 1.0f  // v1, vt4, vn6
+        };
+        std::vector<GLuint> cubeIndices(36);
+        for (GLuint i = 0; i < 36; ++i){
+            cubeIndices[i] = i;
+        }
+        glGenVertexArrays(1, &cube_VAO);
+        glGenBuffers(1, &cube_VBO);
+        glGenBuffers(1, &cube_EBO);
+        glBindVertexArray(cube_VAO);
+        glBindBuffer(GL_ARRAY_BUFFER, cube_VBO);
+        glBufferData(GL_ARRAY_BUFFER, cubeVertices.size() * sizeof(GLfloat), cubeVertices.data(), GL_STATIC_DRAW);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cube_EBO);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, cubeIndices.size() * sizeof(GLuint), cubeIndices.data(), GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (void*)0);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (void*)(6 * sizeof(GLfloat)));
+        glEnableVertexAttribArray(2);
+        glBindVertexArray(0);
+            
+
 	}
 };
 
@@ -1112,6 +1366,23 @@ public:
             return DestructiveCompute->getSubsteps();
         }
         return -1;
+    }
+    void applyExternalForces(int forceType, float forceWeight){
+        if(DestructiveCompute){
+            DestructiveCompute->applyExternalForces(forceType, forceWeight);
+        }
+    }
+
+    void setDT(float dt){
+        if(DestructiveCompute){
+            DestructiveCompute->setDT(dt);
+        }
+    }
+
+    void setProjectileType(int type){
+        if(DestructiveCompute){
+            DestructiveCompute->setProjectileType(type);
+        }
     }
 
 
