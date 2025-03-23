@@ -763,6 +763,33 @@ public:
         projectileType = type;
     }
 
+    void updateProjectiles(){
+        if(projectileType == 0){
+            mSphereRadius = 0.0f;
+            mBoxSize = glm::vec3(0.0f, 0.0f, 0.0f);
+            return;
+        }
+        if(projectileType==1){// linear ball 
+            mSpherePos.z = sin(5.0f * SystemUBO.Time+1.0f);
+            mSphereRadius = 0.25f;
+        }
+        else{
+            mSphereRadius = 0.0f;
+        }
+        if(projectileType==2){// blender
+            mBoxTrans = glm::rotate(glm::translate(
+                glm::mat4(1.0f), glm::vec3(0.0f, -0.7f, 0.0f)
+            ), 10.1f * SystemUBO.Time, glm::vec3(0.0f, 1.0f, 0.0f));
+            mBoxSize = glm::vec3(0.15f, 0.03f, 0.7f);
+        }
+        else{
+            mBoxSize = glm::vec3(0.0f, 0.0f, 0.0f);
+        }
+        
+        updateSphereProjectile(mSpherePos, mSphereRadius);
+        updateBoxProjectile(mBoxTrans, mBoxSize);
+    }
+
 private:
     // some data
     int substeps = 3;
@@ -816,32 +843,6 @@ private:
         glClearNamedBufferData(buffer, GL_R32I, GL_RED_INTEGER, GL_INT, &zero);
     }
 
-    void updateProjectiles(){
-        if(projectileType == 0){
-            mSphereRadius = 0.0f;
-            mBoxSize = glm::vec3(0.0f, 0.0f, 0.0f);
-            return;
-        }
-        if(projectileType==1){// linear ball 
-            mSpherePos.z = sin(5.0f * SystemUBO.Time+1.0f);
-            mSphereRadius = 0.25f;
-        }
-        else{
-            mSphereRadius = 0.0f;
-        }
-        if(projectileType==2){// blender
-            mBoxTrans = glm::rotate(glm::translate(
-                glm::mat4(1.0f), glm::vec3(0.0f, -0.7f, 0.0f)
-            ), 10.1f * SystemUBO.Time, glm::vec3(0.0f, 1.0f, 0.0f));
-            mBoxSize = glm::vec3(0.15f, 0.03f, 0.7f);
-        }
-        else{
-            mBoxSize = glm::vec3(0.0f, 0.0f, 0.0f);
-        }
-        
-        updateSphereProjectile(mSpherePos, mSphereRadius);
-        updateBoxProjectile(mBoxTrans, mBoxSize);
-    }
 
     void updateSphereProjectile(glm::vec3 center, float radius){
         particleCollisionShader->use();
@@ -1382,6 +1383,7 @@ public:
     void setProjectileType(int type){
         if(DestructiveCompute){
             DestructiveCompute->setProjectileType(type);
+            DestructiveCompute->updateProjectiles();
         }
     }
 
