@@ -16,21 +16,17 @@ enum MaterialType {
 
 class ObjectRenderComponent : public RenderComponent {
 public:
-    ObjectRenderComponent(GMVPObject * _obj, enum renderQueue _renderPriority = OPAQUE, RenderContext * _context = nullptr) {
+    ObjectRenderComponent(std::shared_ptr<GMVPObject> _obj, enum renderQueue _renderPriority = OPAQUE) {
         this->obj = _obj;
         renderPriority = _renderPriority;
-        this->context = _context;
     }
     void Render() override {
-        if (context != nullptr) {
-            obj->prepareDraw(context);
-        }
+
         obj->draw();
     }
 
 private:
-    GMVPObject * obj;
-    RenderContext * context = nullptr;
+std::shared_ptr<GMVPObject> obj;
 };
 
 
@@ -44,9 +40,9 @@ private:
 // interact with other components in CPU
 class CommonSceneObject : public RenderableSceneObject {
 public:
-    CommonSceneObject(GMVPObject * _obj, enum renderQueue _renderPriority = OPAQUE, RenderContext * _context = nullptr) {
+    CommonSceneObject(std::shared_ptr<GMVPObject> _obj, enum renderQueue _renderPriority = OPAQUE) {
         this->obj = _obj;
-        this->renderComponent = std::make_shared<ObjectRenderComponent>(obj,_renderPriority,_context);
+        this->renderComponent = std::make_shared<ObjectRenderComponent>(obj,_renderPriority);
         
     }
     ~CommonSceneObject() {
@@ -103,7 +99,7 @@ public:
     }
     
     // default rendering components
-    GMVPObject * obj = nullptr; // the default object, it is used for forward rendering in the default renderer
+    std::shared_ptr<GMVPObject> obj = nullptr; // the default object, it is used for forward rendering in the default renderer
     
     int materialType; // 0: lambertian, 1: metal, 2: dielectric, 3: emissive
 
@@ -121,8 +117,8 @@ public:
 
 class Skybox : public RenderableSceneObject {
 public:
-    GSkybox * skybox;
-    Skybox(GSkybox * _skybox) {
+    std::shared_ptr<GSkybox> skybox;
+    Skybox(std::shared_ptr<GSkybox> _skybox) {
         this->skybox = _skybox;
         this->renderComponent = std::make_unique<ObjectRenderComponent>(_skybox, SKYBOX);
         SkyboxTexture * _skyboxTexture = _skybox->skyboxTexture;

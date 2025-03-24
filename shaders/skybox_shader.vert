@@ -9,6 +9,21 @@ layout(std140, binding = 0) uniform RenderInfo{
     vec3 cameraPos;
 };
 
+layout(std140, binding = 10) uniform RenderLightInfo{
+    bool bUsePointLight;
+    int PointLightCount;
+    vec3 PointLightPos1;
+    vec3 PointLightColor1;
+    vec3 PointLightPos2;
+    vec3 PointLightColor2;
+    vec3 PointLightPos3;
+    vec3 PointLightColor3;
+    bool bUseDirectionalLight;
+    vec3 DirectionalLightDir;
+    vec3 DirectionalLightColor;
+    vec3 AmbientLightColor;
+};
+
 void main()
 {
     //remove translation from view matrix

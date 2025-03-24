@@ -16,19 +16,11 @@
 // and since compute shader objects are usually highly specialized, they should be implemented separately
 
 
-// render context, contains view matrix, projection matrix, camera position, etc.
-// not used currently, we use ubo to pass vp matrix
-struct RenderContext {
-public:
-	// light info
-	int lightCount;
-	glm::vec3 lightPos;
-	glm::vec3 lightColor;
-	glm::vec3 ambientColor;
 
-};
-
-
+// GObject class, the base class for all graphics objects
+// it contains the basic opengl objects (VAO, VBO, EBO) and a shader reference, necessary for rendering
+// it will manage the vao, vbo, ebo buffer resources
+// it will not manage the shader and texture resource, since these resources are shared among different objects
 class GObject {
 public:
 	// render related opengl objects references
@@ -37,24 +29,22 @@ public:
 	Shader *shader;
 	bool hasTexture = false;
 	Texture * texture = nullptr;
-
+	bool isBackFace = false;
 
 	// draw function, to be implemented by derived classes
 	virtual void draw() = 0;
-	// do before draw, to be implemented by derived classes
-	// since we use ubo to pass vp matrix, this function is not useful currently
-	virtual void prepareDraw(const RenderContext * context) {
-		// default implementation: do nothing
-	}
 	virtual void setShader(Shader* _shader) {
 		shader = _shader;
 	}
-	virtual void Delete() = 0;
+	virtual ~GObject() {} 
 
 	// load texture from a const unsigned char* data, used for loading texture from memory
 	virtual void setTexture(Texture * _texture) {
 		hasTexture = true;
 		this->texture = _texture;
+	}
+	virtual void setIsBackFace(bool _isBackFace) {
+		this->isBackFace = _isBackFace;
 	}
 };
 
@@ -90,14 +80,11 @@ class GRect : public GScreenSpaceObject {
 		}
 
 
-		void Delete() override {
+		~GRect() {
 			glDeleteVertexArrays(1, &VAO);
 			glDeleteBuffers(1, &VBO);
-		};
-
-		void prepareDraw(const RenderContext * context) override {
-			
 		}
+
 
 		void draw() override {
 			shader->use();
@@ -107,6 +94,13 @@ class GRect : public GScreenSpaceObject {
 				shader->setInt("texture1", 0);
 			}	
 			shader->setBool("useTexture", hasTexture);
+			shader->setBool("isBackFace", isBackFace);
+			if(isBackFace){
+				glCullFace(GL_FRONT);
+			}
+			else{
+				glCullFace(GL_BACK);
+			}
 			glBindVertexArray(VAO);
 			glDrawArrays(GL_TRIANGLES, 0, 6);
 			glBindVertexArray(0);
@@ -121,14 +115,7 @@ public:
 	glm::mat4 model;
 	glm::vec4 color;
 	SkyboxTexture * skyboxTexture = nullptr;
-	void prepareDraw(const RenderContext * context) override {
-		// set the light info
-		shader->use();
-		shader->setVec3("lightPos", context->lightPos);
-		shader->setVec3("lightColor", context->lightColor);
-		shader->setVec3("ambientLightColor", context->ambientColor);
-		shader->setInt("numOfLights", context->lightCount);
-	}
+
 	virtual void setModel(glm::mat4 _model) {
 		model = _model;
 	}
@@ -160,11 +147,11 @@ public:
 		generateBufferResource();
 	};
 
-	void Delete() override {
+	~GSphere() {
 		glDeleteVertexArrays(1, &VAO);
 		glDeleteBuffers(1, &VBO);
 		glDeleteBuffers(1, &EBO);
-	};
+	}
 
 
 	void draw() override {
@@ -177,7 +164,16 @@ public:
 		shader->setBool("useTexture", hasTexture);
 		shader->setMat4("model", model);
 		shader->setVec4("color", color);
-		shader->setInt("skyboxTexture", skyboxTexture->getTextureRef());
+		shader->setBool("isBackFace", isBackFace);
+		if(isBackFace){
+			glCullFace(GL_FRONT);
+		}
+		else{
+			glCullFace(GL_BACK);
+		}
+		if(skyboxTexture){
+			shader->setInt("skyboxTexture", skyboxTexture->getTextureRef());
+		}
 		glBindVertexArray(VAO);
 		glDrawElements(GL_TRIANGLES, 10800, GL_UNSIGNED_INT, 0);
 		glBindVertexArray(0);
@@ -248,6 +244,144 @@ public:
 	}
 };
 
+class GCube : public GMVPObject {
+	public:
+		GLuint EBO;
+		float edgeLength;
+		glm::vec3 center;
+		GCube() {
+			edgeLength = 1.0f;
+			center = glm::vec3(0.0f, 0.0f, 0.0f);
+			generateBufferResource();
+		}
+		// another initialization function, set the center and radius of the sphere
+		GCube(glm::vec3 _center, float _edgeLength) {
+			center = _center;
+			edgeLength = _edgeLength;
+			generateBufferResource();
+		};
+	
+		~GCube() {
+			glDeleteVertexArrays(1, &VAO);
+			glDeleteBuffers(1, &VBO);
+			glDeleteBuffers(1, &EBO);
+		}
+	
+	
+		void draw() override {
+			shader->use();
+			if (hasTexture) {
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, texture->getTextureRef());
+				shader->setInt("texture1", 0);
+			}
+			shader->setBool("useTexture", hasTexture);
+			shader->setMat4("model", model);
+			shader->setVec4("color", color);
+			shader->setBool("isBackFace", isBackFace);
+			if(isBackFace){
+				glCullFace(GL_FRONT);
+			}
+			else{
+				glCullFace(GL_BACK);
+			}
+			if(skyboxTexture){
+				shader->setInt("skyboxTexture", skyboxTexture->getTextureRef());
+			}
+			glBindVertexArray(VAO);
+			glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+			glBindVertexArray(0);
+		}
+		
+	
+		void generateBufferResource(){
+			std::vector<GLfloat> baseCubeVertices = {
+				// -------- Face 1: bottom 
+				// Triangle 1
+				1.0f, -1.0f, -1.0f,    0.0f, -1.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn1
+				1.0f, -1.0f,  1.0f,    0.0f, -1.0f, 0.0f,    1.0f, 0.0f, // v2, vt2, vn1
+				-1.0f, -1.0f,  1.0f,    0.0f, -1.0f, 0.0f,    0.0f, 0.0f, // v3, vt3, vn1
+				// Triangle 2
+				1.0f, -1.0f, -1.0f,    0.0f, -1.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn1
+				-1.0f, -1.0f,  1.0f,    0.0f, -1.0f, 0.0f,    0.0f, 0.0f, // v3, vt3, vn1
+				-1.0f, -1.0f, -1.0f,    0.0f, -1.0f, 0.0f,    0.0f, 1.0f, // v4, vt4, vn1
+				// -------- Face 2: top
+				// Triangle 1
+				1.0f,  1.0f, -1.0f,    0.0f,  1.0f, 0.0f,    1.0f, 1.0f, // v5, vt1, vn2
+				-1.0f,  1.0f, -1.0f,    0.0f,  1.0f, 0.0f,    0.0f, 1.0f, // v8, vt4, vn2
+				-1.0f,  1.0f,  1.0f,    0.0f,  1.0f, 0.0f,    0.0f, 0.0f, // v7, vt3, vn2
+				// Triangle 2
+				1.0f,  1.0f, -1.0f,    0.0f,  1.0f, 0.0f,    1.0f, 1.0f, // v5, vt1, vn2
+				-1.0f,  1.0f,  1.0f,    0.0f,  1.0f, 0.0f,    0.0f, 0.0f, // v7, vt3, vn2
+				1.0f,  1.0f,  1.0f,    0.0f,  1.0f, 0.0f,    1.0f, 0.0f, // v6, vt2, vn2
+				// -------- Face 3: right
+				// Triangle 1
+				1.0f, -1.0f, -1.0f,    1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn3
+				1.0f,  1.0f, -1.0f,    1.0f,  0.0f, 0.0f,    1.0f, 0.0f, // v5, vt2, vn3
+				1.0f,  1.0f,  1.0f,    1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v6, vt3, vn3
+				// Triangle 2
+				1.0f, -1.0f, -1.0f,    1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn3
+				1.0f,  1.0f,  1.0f,    1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v6, vt3, vn3
+				1.0f, -1.0f,  1.0f,    1.0f,  0.0f, 0.0f,    0.0f, 1.0f, // v2, vt4, vn3
+				// -------- Face 4: front
+				// Triangle 1
+				1.0f, -1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    1.0f, 1.0f, // v2, vt1, vn4
+				1.0f,  1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    1.0f, 0.0f, // v6, vt2, vn4
+				-1.0f,  1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    0.0f, 0.0f, // v7, vt3, vn4
+				// Triangle 2
+				1.0f, -1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    1.0f, 1.0f, // v2, vt1, vn4
+				-1.0f,  1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    0.0f, 0.0f, // v7, vt3, vn4
+				-1.0f, -1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    0.0f, 1.0f, // v3, vt4, vn4
+				// -------- Face 5: left
+				// Triangle 1
+				-1.0f, -1.0f,  1.0f,   -1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v3, vt1, vn5
+				-1.0f,  1.0f,  1.0f,   -1.0f,  0.0f, 0.0f,    1.0f, 0.0f, // v7, vt2, vn5
+				-1.0f,  1.0f, -1.0f,   -1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v8, vt3, vn5
+				// Triangle 2
+				-1.0f, -1.0f,  1.0f,   -1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v3, vt1, vn5
+				-1.0f,  1.0f, -1.0f,   -1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v8, vt3, vn5
+				-1.0f, -1.0f, -1.0f,   -1.0f,  0.0f, 0.0f,    0.0f, 1.0f, // v4, vt4, vn5
+				// -------- Face 6: back
+				// Triangle 1
+				-1.0f, -1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   1.0f, 1.0f, // v4, vt1, vn6
+				-1.0f,  1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   1.0f, 0.0f, // v8, vt2, vn6
+				1.0f,  1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   0.0f, 0.0f, // v5, vt3, vn6
+				// Triangle 2
+				-1.0f, -1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   1.0f, 1.0f, // v4, vt1, vn6
+				1.0f,  1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   0.0f, 0.0f, // v5, vt3, vn6
+				1.0f, -1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   0.0f, 1.0f  // v1, vt4, vn6
+			};
+			std::vector<GLfloat> cubeVerticesTransformed = baseCubeVertices;
+			float scale = edgeLength / 2.0f;
+			for (size_t i = 0; i < cubeVerticesTransformed.size(); i += 8) {
+				float x = cubeVerticesTransformed[i + 0];
+				float y = cubeVerticesTransformed[i + 1];
+				float z = cubeVerticesTransformed[i + 2];
+				cubeVerticesTransformed[i + 0] = center.x + x * scale;
+				cubeVerticesTransformed[i + 1] = center.y + y * scale;
+				cubeVerticesTransformed[i + 2] = center.z + z * scale;
+			}
+			std::vector<GLuint> cubeIndices(36);
+			for (GLuint i = 0; i < 36; ++i){
+				cubeIndices[i] = i;
+			}
+			glGenVertexArrays(1, &VAO);
+			glGenBuffers(1, &VBO);
+			glGenBuffers(1, &EBO);
+			glBindVertexArray(VAO);
+			glBindBuffer(GL_ARRAY_BUFFER, VBO);
+			glBufferData(GL_ARRAY_BUFFER, cubeVerticesTransformed.size() * sizeof(GLfloat), cubeVerticesTransformed.data(), GL_STATIC_DRAW);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, cubeIndices.size() * sizeof(GLuint), cubeIndices.data(), GL_STATIC_DRAW);
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (void*)0);
+			glEnableVertexAttribArray(0);
+			glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
+			glEnableVertexAttribArray(1);
+			glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (void*)(6 * sizeof(GLfloat)));
+			glEnableVertexAttribArray(2);
+			glBindVertexArray(0);
+		}
+};
 
 
 // a single triangle
@@ -274,10 +408,10 @@ glm::vec2 t0,t1,t2;
 		generateBufferResource();
 	};
 
-	void Delete() override {
+	~GTriangle() {
 		glDeleteVertexArrays(1, &VAO);
 		glDeleteBuffers(1, &VBO);
-	};
+	}
 
 	void draw() override {
 		shader->use();
@@ -289,7 +423,16 @@ glm::vec2 t0,t1,t2;
 		shader->setBool("useTexture", hasTexture);
 		shader->setMat4("model", model);
 		shader->setVec4("color", color);
-		shader->setInt("skyboxTexture", skyboxTexture->getTextureRef());
+		shader->setBool("isBackFace", isBackFace);
+		if(isBackFace){
+			glCullFace(GL_FRONT);
+		}
+		else{
+			glCullFace(GL_BACK);
+		}
+		if(skyboxTexture){
+			shader->setInt("skyboxTexture", skyboxTexture->getTextureRef());
+		}
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 		glBindVertexArray(0);
@@ -392,10 +535,10 @@ public:
 	}
 
 
-	void Delete() override {
+	~GSkybox() {
 		glDeleteVertexArrays(1, &VAO);
 		glDeleteBuffers(1, &VBO);
-	};
+	}
 
 	void draw() override {
 		glDepthFunc(GL_LEQUAL);
@@ -403,6 +546,13 @@ public:
 		if (!hasTexture) {
 			std::cerr<<"ERROR: skybox has no texture"<<std::endl;
 			return;
+		}
+		shader->setBool("isBackFace", isBackFace);
+		if(isBackFace){
+			glCullFace(GL_FRONT);
+		}
+		else{
+			glCullFace(GL_BACK);
 		}
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_CUBE_MAP, skyboxTexture->getTextureRef());
@@ -601,6 +751,13 @@ class GMesh : public GMVPObject {
 		shader->setBool("useTexture", hasTexture);
 		shader->setMat4("model", model);
 		shader->setVec4("color", color); // set the color
+		shader->setBool("isBackFace", isBackFace);
+		if(isBackFace){
+			glCullFace(GL_FRONT);
+		}
+		else{
+			glCullFace(GL_BACK);
+		}
 		if(skyboxTexture){
 			shader->setInt("skyboxTexture", skyboxTexture->getTextureRef());
 		}
@@ -610,8 +767,7 @@ class GMesh : public GMVPObject {
 		
 	}
 
-	void Delete() override
-	{
+	~GMesh() {
 		glDeleteVertexArrays(1, &VAO);
 		glDeleteBuffers(1, &VBO);
 		glDeleteBuffers(1, &EBO);
@@ -677,11 +833,7 @@ class GModel : public GMVPObject {
 			meshes[i]->draw();
 	}
 
-	void Delete() override
-	{
-		for (unsigned int i = 0; i < meshes.size(); i++)
-			meshes[i]->Delete();
-		// then delete the meshes
+	~GModel() {
 		for (unsigned int i = 0; i < meshes.size(); i++)
 			delete meshes[i];
 	}
@@ -703,11 +855,12 @@ class GModel : public GMVPObject {
 			meshes[i]->setModel(_model);
 	}
 
-	void prepareDraw(const RenderContext * context) override {
-		
+	void setIsBackFace(bool _isBackFace) override {
+		isBackFace = _isBackFace;
 		for (unsigned int i = 0; i < meshes.size(); i++)
-			meshes[i]->prepareDraw(context);
+			meshes[i]->setIsBackFace(_isBackFace);
 	}
+
 
 
 };

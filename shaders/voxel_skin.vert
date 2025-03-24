@@ -10,6 +10,21 @@ layout(std140, binding = 0) uniform RenderInfo{
     vec3 cameraPos;
 };
 
+layout(std140, binding = 10) uniform RenderLightInfo{
+    bool bUsePointLight;
+    int PointLightCount;
+    vec3 PointLightPos1;
+    vec3 PointLightColor1;
+    vec3 PointLightPos2;
+    vec3 PointLightColor2;
+    vec3 PointLightPos3;
+    vec3 PointLightColor3;
+    bool bUseDirectionalLight;
+    vec3 DirectionalLightDir;
+    vec3 DirectionalLightColor;
+    vec3 AmbientLightColor;
+};
+
 // instance properties from the particle system SSBO
 struct Particle {
     vec4 curPos;   //we need curPos.xyz to get the position of the particle, and w to get the size of the particle (radius)

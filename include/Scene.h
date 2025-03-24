@@ -30,13 +30,12 @@ class Scene {
 public:
     // TODO: use smart pointers
     // and fix all memory leaks...
-    std::vector<SceneObject*> sceneObjects;
+    std::vector<std::unique_ptr<SceneObject>> sceneObjects;
     std::vector<std::shared_ptr<RenderComponent>> renderQueue; // object components to be rendered each frame
     std::vector<std::shared_ptr<ComputeComponent>> computeQueue; // object components to be computed via compute shader each frame
-    std::vector<Light*> sceneLights; // point lights in the scene
-    
-    SkyboxTexture * skyboxTexture; // skybox texture
-    RenderContext * renderContext = nullptr;
+    std::vector<std::unique_ptr<Light>> sceneLights;
+    std::shared_ptr<SkyboxTexture> skyboxTexture;
+    std::vector<std::unique_ptr<Shader>> shaders; // scene will manage the shaders, when scene is destroyed, the shaders will be destroyed
 
     void sortRenderQueue() {
         std::sort(renderQueue.begin(), renderQueue.end(), [](std::shared_ptr<RenderComponent> a, std::shared_ptr<RenderComponent> b) {
@@ -48,32 +47,25 @@ public:
     }
 
     virtual ~Scene() {
-        for (SceneObject* sceneObject : sceneObjects) {
-            delete sceneObject;
-        }
-        for (Light* light : sceneLights) {
-            delete light;
-        }
-        
     }
 
 
-    Scene(RenderContext* _renderContext = nullptr, SceneName sceneName = SCENE1) {
+    Scene(SceneName sceneName = SCENE1) {
         switch (sceneName) {
             case SCENE1:
-                createScene1(_renderContext);
+                createScene1();
                 break;
             case SCENE2:
-                createScene2(_renderContext);
+                createScene2();
                 break;
             case SCENE3:
-                createScene3(_renderContext);
+                createScene3();
                 break;
             case SCENE4:
-                createScene4(_renderContext);
+                createScene4();
                 break;
             case SCENE5:
-                createScene5(_renderContext);
+                createScene5();
                 break;
             default:
                 std::cout<<"[Scene]: invalid scene name"<<std::endl;
@@ -92,108 +84,163 @@ public:
     
     }
 
+    const char * vertexShaderPath = "shaders/object_shader.vert";
+    const char * fragmentShaderPath = "shaders/object_shader.frag";
+
     // the Destructible Adaptive Grid Particle System scene
-    bool createScene1(RenderContext* _renderContext){
-        renderContext = _renderContext;
-        // skybox
-        skyboxTexture = new SkyboxTexture();
+    bool createScene1(){
+        // create skybox texture
+        skyboxTexture = std::make_shared<SkyboxTexture>();
         skyboxTexture->loadFromFolder("resource/skybox");
         skyboxTexture->createSkyboxTexture();
-        GSkybox * _skybox = new GSkybox();
-        _skybox->setShader(new Shader("shaders/skybox_shader.vert", "shaders/skybox_shader.frag"));
-        _skybox->setTexture(skyboxTexture);
-        Skybox * skybox = new Skybox(_skybox);
+        // shaders are managed by the scene, so we use unique_ptr
+        auto skyboxShader = std::make_unique<Shader>("shaders/skybox_shader.vert", "shaders/skybox_shader.frag");
+        // get the raw pointer of the shader, and pass it to the skybox object
+        Shader* pSkyboxShader = skyboxShader.get();
+        shaders.push_back(std::move(skyboxShader));
+        // create the skybox GObject and SceneObject
+        auto _skybox = std::make_unique<GSkybox>();
+        _skybox->setShader(pSkyboxShader);
+        _skybox->setTexture(skyboxTexture.get());
+        auto skybox = std::make_unique<Skybox>(std::move(_skybox));
         skybox->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(skybox);
-        // --------------------------------------------------------------------------------
-        // probably need to refactor this part, it's not a good idea to put one object into another object
-        // maybe use GModel instead of CommonSceneObject
-        // the mesh we want to voxelize and destruct
-        GModel * inputMesh = new GModel("resource/stanford-bunny1x1x1.obj");
-        inputMesh->setModel(glm::scale(glm::mat4(1.0), glm::vec3(1.25)) *glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.25, -0.5)));
-        // the DestructiveCSSceneObject
-        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(inputMesh), TRANSPARENT, renderContext);
+        sceneObjects.push_back(std::move(skybox));
+        auto objectShader = std::make_unique<Shader>("shaders/object_shader.vert", "shaders/object_shader.frag");
+        Shader* pObjectShader = objectShader.get();
+        shaders.push_back(std::move(objectShader));
+        auto inputMesh = std::make_unique<GModel>("resource/stanford-bunny1x1x1.obj");
+        inputMesh->setModel(glm::scale(glm::mat4(1.0f), glm::vec3(1.25f)) * glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, -0.25f, -0.5f)));
+        inputMesh->setShader(pObjectShader);
+        inputMesh->setColor(glm::vec4(0.6, 0.7, 1.0, 0.4));
+        auto destructiveCSSceneObject = std::make_unique<DestructiveCSSceneObject>(std::shared_ptr<GModel>(std::move(inputMesh)), TRANSPARENT);
         destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
         destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(destructiveCSSceneObject);
+        sceneObjects.push_back(std::move(destructiveCSSceneObject));
 
+        return true;
+    }
+    bool createScene2(){
+        // create skybox texture
+        skyboxTexture = std::make_shared<SkyboxTexture>();
+        skyboxTexture->loadFromFolder("resource/skybox");
+        skyboxTexture->createSkyboxTexture();
+        // shaders are managed by the scene, so we use unique_ptr
+        auto skyboxShader = std::make_unique<Shader>("shaders/skybox_shader.vert", "shaders/skybox_shader.frag");
+        // get the raw pointer of the shader, and pass it to the skybox object
+        Shader* pSkyboxShader = skyboxShader.get();
+        shaders.push_back(std::move(skyboxShader));
+        // create the skybox GObject and SceneObject
+        auto _skybox = std::make_unique<GSkybox>();
+        _skybox->setShader(pSkyboxShader);
+        _skybox->setTexture(skyboxTexture.get());
+        auto skybox = std::make_unique<Skybox>(std::move(_skybox));
+        skybox->attachToSceneRenderList(renderQueue);
+        sceneObjects.push_back(std::move(skybox));
+        auto objectShader = std::make_unique<Shader>("shaders/object_shader.vert", "shaders/object_shader.frag");
+        Shader* pObjectShader = objectShader.get();
+        shaders.push_back(std::move(objectShader));
+        auto inputMesh = std::make_unique<GModel>("resource/armtest1x1x1.obj");
+        inputMesh->setModel(glm::scale(glm::mat4(1.0f), glm::vec3(1.25f)) * glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, -0.25f, -0.5f)));
+        inputMesh->setShader(pObjectShader);
+        inputMesh->setColor(glm::vec4(0.6, 0.7, 1.0, 0.4));
+        auto destructiveCSSceneObject = std::make_unique<DestructiveCSSceneObject>(std::shared_ptr<GModel>(std::move(inputMesh)), TRANSPARENT);
+        destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
+        destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
+        sceneObjects.push_back(std::move(destructiveCSSceneObject));
 
         return true;
     }
-    bool createScene2(RenderContext* _renderContext){
-        renderContext = _renderContext;
-        skyboxTexture = new SkyboxTexture();
+    bool createScene3(){
+        // create skybox texture
+        skyboxTexture = std::make_shared<SkyboxTexture>();
         skyboxTexture->loadFromFolder("resource/skybox");
         skyboxTexture->createSkyboxTexture();
-        GSkybox * _skybox = new GSkybox();
-        _skybox->setShader(new Shader("shaders/skybox_shader.vert", "shaders/skybox_shader.frag"));
-        _skybox->setTexture(skyboxTexture);
-        Skybox * skybox = new Skybox(_skybox);
+        // shaders are managed by the scene, so we use unique_ptr
+        auto skyboxShader = std::make_unique<Shader>("shaders/skybox_shader.vert", "shaders/skybox_shader.frag");
+        // get the raw pointer of the shader, and pass it to the skybox object
+        Shader* pSkyboxShader = skyboxShader.get();
+        shaders.push_back(std::move(skyboxShader));
+        // create the skybox GObject and SceneObject
+        auto _skybox = std::make_unique<GSkybox>();
+        _skybox->setShader(pSkyboxShader);
+        _skybox->setTexture(skyboxTexture.get());
+        auto skybox = std::make_unique<Skybox>(std::move(_skybox));
         skybox->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(skybox);
-        GModel * inputMesh = new GModel("resource/armtest1x1x1.obj");
-        inputMesh->setModel(glm::scale(glm::mat4(1.0), glm::vec3(1.25)) *glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.25, -0.5)));
-        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(inputMesh), TRANSPARENT, renderContext);
+        sceneObjects.push_back(std::move(skybox));
+        auto objectShader = std::make_unique<Shader>("shaders/object_shader.vert", "shaders/object_shader.frag");
+        Shader* pObjectShader = objectShader.get();
+        shaders.push_back(std::move(objectShader));
+        auto inputMesh = std::make_unique<GModel>("resource/gummyBear1x1x1.obj");
+        inputMesh->setModel(glm::scale(glm::mat4(1.0f), glm::vec3(1.25f)) * glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, -0.25f, -0.5f)));
+        inputMesh->setShader(pObjectShader);
+        inputMesh->setColor(glm::vec4(0.6, 0.7, 1.0, 0.4));
+        auto destructiveCSSceneObject = std::make_unique<DestructiveCSSceneObject>(std::shared_ptr<GModel>(std::move(inputMesh)), TRANSPARENT);
         destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
         destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(destructiveCSSceneObject);
+        sceneObjects.push_back(std::move(destructiveCSSceneObject));
+
         return true;
     }
-    bool createScene3(RenderContext* _renderContext){
-        renderContext = _renderContext;
-        skyboxTexture = new SkyboxTexture();
+    bool createScene4(){
+        // create skybox texture
+        skyboxTexture = std::make_shared<SkyboxTexture>();
         skyboxTexture->loadFromFolder("resource/skybox");
         skyboxTexture->createSkyboxTexture();
-        GSkybox * _skybox = new GSkybox();
-        _skybox->setShader(new Shader("shaders/skybox_shader.vert", "shaders/skybox_shader.frag"));
-        _skybox->setTexture(skyboxTexture);
-        Skybox * skybox = new Skybox(_skybox);
+        // shaders are managed by the scene, so we use unique_ptr
+        auto skyboxShader = std::make_unique<Shader>("shaders/skybox_shader.vert", "shaders/skybox_shader.frag");
+        // get the raw pointer of the shader, and pass it to the skybox object
+        Shader* pSkyboxShader = skyboxShader.get();
+        shaders.push_back(std::move(skyboxShader));
+        // create the skybox GObject and SceneObject
+        auto _skybox = std::make_unique<GSkybox>();
+        _skybox->setShader(pSkyboxShader);
+        _skybox->setTexture(skyboxTexture.get());
+        auto skybox = std::make_unique<Skybox>(std::move(_skybox));
         skybox->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(skybox);
-        GModel * inputMesh = new GModel("resource/gummyBear1x1x1.obj");
-        inputMesh->setModel(glm::scale(glm::mat4(1.0), glm::vec3(1.25)) *glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.25, -0.5)));
-        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(inputMesh), TRANSPARENT, renderContext);
+        sceneObjects.push_back(std::move(skybox));
+        auto objectShader = std::make_unique<Shader>("shaders/object_shader.vert", "shaders/object_shader.frag");
+        Shader* pObjectShader = objectShader.get();
+        shaders.push_back(std::move(objectShader));
+        auto inputMesh = std::make_unique<GModel>("resource/skyscraper1x1x1.obj");
+        inputMesh->setModel(glm::scale(glm::mat4(1.0f), glm::vec3(1.25f)) * glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, -0.25f, -0.5f)));
+        inputMesh->setShader(pObjectShader);
+        inputMesh->setColor(glm::vec4(0.6, 0.7, 1.0, 0.4));
+        auto destructiveCSSceneObject = std::make_unique<DestructiveCSSceneObject>(std::shared_ptr<GModel>(std::move(inputMesh)), TRANSPARENT);
         destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
         destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(destructiveCSSceneObject);
+        sceneObjects.push_back(std::move(destructiveCSSceneObject));
+
         return true;
     }
-    bool createScene4(RenderContext* _renderContext){
-        renderContext = _renderContext;
-        skyboxTexture = new SkyboxTexture();
+    bool createScene5(){
+        // create skybox texture
+        skyboxTexture = std::make_shared<SkyboxTexture>();
         skyboxTexture->loadFromFolder("resource/skybox");
         skyboxTexture->createSkyboxTexture();
-        GSkybox * _skybox = new GSkybox();
-        _skybox->setShader(new Shader("shaders/skybox_shader.vert", "shaders/skybox_shader.frag"));
-        _skybox->setTexture(skyboxTexture);
-        Skybox * skybox = new Skybox(_skybox);
+        // shaders are managed by the scene, so we use unique_ptr
+        auto skyboxShader = std::make_unique<Shader>("shaders/skybox_shader.vert", "shaders/skybox_shader.frag");
+        // get the raw pointer of the shader, and pass it to the skybox object
+        Shader* pSkyboxShader = skyboxShader.get();
+        shaders.push_back(std::move(skyboxShader));
+        // create the skybox GObject and SceneObject
+        auto _skybox = std::make_unique<GSkybox>();
+        _skybox->setShader(pSkyboxShader);
+        _skybox->setTexture(skyboxTexture.get());
+        auto skybox = std::make_unique<Skybox>(std::move(_skybox));
         skybox->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(skybox);
-        GModel * inputMesh = new GModel("resource/skyscraper1x1x1.obj");
-        inputMesh->setModel(glm::scale(glm::mat4(1.0), glm::vec3(1.25)) *glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.25, -0.5)));
-        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(inputMesh), TRANSPARENT, renderContext);
+        sceneObjects.push_back(std::move(skybox));
+        auto objectShader = std::make_unique<Shader>("shaders/object_shader.vert", "shaders/object_shader.frag");
+        Shader* pObjectShader = objectShader.get();
+        shaders.push_back(std::move(objectShader));
+        auto inputMesh = std::make_unique<GModel>("resource/Teapot1x1x1.obj");
+        inputMesh->setModel(glm::scale(glm::mat4(1.0f), glm::vec3(1.25f)) * glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, -0.25f, -0.5f)));
+        inputMesh->setShader(pObjectShader);
+        inputMesh->setColor(glm::vec4(0.6, 0.7, 1.0, 0.4));
+        auto destructiveCSSceneObject = std::make_unique<DestructiveCSSceneObject>(std::shared_ptr<GModel>(std::move(inputMesh)), TRANSPARENT);
         destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
         destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(destructiveCSSceneObject);
-        return true;
-    }
-    bool createScene5(RenderContext* _renderContext){
-        renderContext = _renderContext;
-        skyboxTexture = new SkyboxTexture();
-        skyboxTexture->loadFromFolder("resource/skybox");
-        skyboxTexture->createSkyboxTexture();
-        GSkybox * _skybox = new GSkybox();
-        _skybox->setShader(new Shader("shaders/skybox_shader.vert", "shaders/skybox_shader.frag"));
-        _skybox->setTexture(skyboxTexture);
-        Skybox * skybox = new Skybox(_skybox);
-        skybox->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(skybox);
-        GModel * inputMesh = new GModel("resource/Teapot1x1x1.obj");
-        inputMesh->setModel(glm::scale(glm::mat4(1.0), glm::vec3(1.25)) *glm::translate(glm::mat4(1.0), glm::vec3(-0.5, -0.25, -0.5)));
-        DestructiveCSSceneObject * destructiveCSSceneObject = new DestructiveCSSceneObject(std::shared_ptr<GModel>(inputMesh), TRANSPARENT, renderContext);
-        destructiveCSSceneObject->attachToSceneComputeList(computeQueue);
-        destructiveCSSceneObject->attachToSceneRenderList(renderQueue);
-        sceneObjects.push_back(destructiveCSSceneObject);
+        sceneObjects.push_back(std::move(destructiveCSSceneObject));
+
         return true;
     }
 
@@ -211,19 +258,17 @@ public:
         if (scene) {
             delete scene;
         }
-        scene = new Scene(renderContext, sceneName);
+        scene = new Scene(sceneName);
     }
-    void setRenderContext(RenderContext* _renderContext) {
-        renderContext = _renderContext;
-    }
+
     Scene* getScene() {
         return scene;
     }
     
-    std::vector<SceneObject*> & getSceneObjects() {
+    std::vector<std::unique_ptr<SceneObject>> & getSceneObjects() {
         if(scene == nullptr) {
             std::cout<<"[SceneManager]: scene is nullptr"<<std::endl;
-            static std::vector<SceneObject*> emptyVector;
+            static std::vector<std::unique_ptr<SceneObject>> emptyVector;
             return emptyVector;
         }
         return scene->sceneObjects;
@@ -231,7 +276,6 @@ public:
 
 private:
     Scene* scene;// TODO; use smart pointer
-    RenderContext* renderContext = nullptr;
     SceneManager(){}
     SceneManager(const SceneManager&) = delete;
     SceneManager& operator=(const SceneManager&) = delete;

@@ -19,10 +19,25 @@
 
 
 
-struct UBORenderInfo {
+struct cameraUBOData {
     glm::mat4 view;
     glm::mat4 projection;
     glm::vec3 cameraPos;
+};
+
+struct alignas(16) lightUBOData {
+    alignas(4) bool bUsePointLight;
+    alignas(4) int PointLightCount;
+    alignas(16) glm::vec3 PointLightPos1;
+    alignas(16) glm::vec3 PointLightColor1;
+    alignas(16) glm::vec3 PointLightPos2;
+    alignas(16) glm::vec3 PointLightColor2;
+    alignas(16) glm::vec3 PointLightPos3;
+    alignas(16) glm::vec3 PointLightColor3;
+    alignas(4) bool bUseDirectionalLight;
+    alignas(16) glm::vec3 DirectionalLightDir;
+    alignas(16) glm::vec3 DirectionalLightColor;
+    alignas(16) glm::vec3 AmbientLightColor;
 };
 
 
@@ -34,11 +49,11 @@ class Renderer {
     Camera * camera = nullptr;
     int screen_width = 800;
     int screen_height = 600;
-    RenderContext * context;
     FrameRateMonitor * frameRateMonitor = nullptr;
 
-    GLuint global_ubo;
-    UBORenderInfo uploadData;
+    GLuint camera_ubo, light_ubo;
+    cameraUBOData CameraUploadData;
+    lightUBOData LightUploadData;
 
 
 	Renderer(int _screen_width, int _screen_height, Camera * camera = nullptr) : camera(camera), screen_width(_screen_width), screen_height(_screen_height) {
@@ -107,41 +122,59 @@ class Renderer {
         InitializeUbo();
         // set up the screenCanvas, it will be used to display the ray tracing result (either CPU version or GPU version)
 
-        context = new RenderContext();
 
 	}
 
     void InitializeUbo() {
         
-        glGenBuffers(1, &global_ubo);
-        glBindBuffer(GL_UNIFORM_BUFFER, global_ubo);
+        glGenBuffers(1, &camera_ubo);
+        glBindBuffer(GL_UNIFORM_BUFFER, camera_ubo);
 
-        uploadData.cameraPos = camera->Position;
-        uploadData.projection = glm::perspective(glm::radians(camera->Zoom), static_cast<float>(screen_width) / static_cast<float>(screen_height), 0.1f, 500.0f);
-        uploadData.view = camera->GetViewMatrix();
-        glBufferData(GL_UNIFORM_BUFFER, sizeof(uploadData), &uploadData, GL_STATIC_DRAW);
+        CameraUploadData.cameraPos = camera->Position;
+        CameraUploadData.projection = glm::perspective(glm::radians(camera->Zoom), static_cast<float>(screen_width) / static_cast<float>(screen_height), 0.1f, 500.0f);
+        CameraUploadData.view = camera->GetViewMatrix();
+        glBufferData(GL_UNIFORM_BUFFER, sizeof(CameraUploadData), &CameraUploadData, GL_STATIC_DRAW);
         glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-        GLuint bindingPoint = 0;
-        glBindBufferBase(GL_UNIFORM_BUFFER, bindingPoint, global_ubo);
+        GLuint cameraBindingPoint = 0;
+        glBindBufferBase(GL_UNIFORM_BUFFER, cameraBindingPoint, camera_ubo);
+
+        LightUploadData.bUsePointLight = false;
+        LightUploadData.PointLightCount = 1;
+        LightUploadData.PointLightPos1 = glm::vec3(0.0f, 1.0f, 0.0f);
+        LightUploadData.PointLightColor1 = glm::vec3(0.3f, 0.5f, 0.3f);
+        LightUploadData.bUseDirectionalLight = true;
+        LightUploadData.DirectionalLightDir = glm::vec3(1.0f, -1.0f, -0.5f);
+        LightUploadData.DirectionalLightColor = glm::vec3(0.9f, 0.9f, 1.0f);
+        LightUploadData.AmbientLightColor = glm::vec3(0.4,0.4,0.5);
+
+        glGenBuffers(1, &light_ubo);
+        glBindBuffer(GL_UNIFORM_BUFFER, light_ubo);
+        glBufferData(GL_UNIFORM_BUFFER, sizeof(LightUploadData), &LightUploadData, GL_STATIC_DRAW);
+        glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+        GLuint lightBindingPoint = 10;
+        glBindBufferBase(GL_UNIFORM_BUFFER, lightBindingPoint, light_ubo);
+
+
     }
 
     void uploadUbo() {
-        if (global_ubo == 0) {
-            glGenBuffers(1, &global_ubo);
-            glBindBuffer(GL_UNIFORM_BUFFER, global_ubo);
+        if (camera_ubo == 0) {
+            glGenBuffers(1, &camera_ubo);
+            glBindBuffer(GL_UNIFORM_BUFFER, camera_ubo);
         }
         else {
-            glBindBuffer(GL_UNIFORM_BUFFER, global_ubo);
+            glBindBuffer(GL_UNIFORM_BUFFER, camera_ubo);
         }
-        glBufferData(GL_UNIFORM_BUFFER, sizeof(uploadData), &uploadData, GL_STATIC_DRAW);
+        glBufferData(GL_UNIFORM_BUFFER, sizeof(CameraUploadData), &CameraUploadData, GL_STATIC_DRAW);
         glBindBuffer(GL_UNIFORM_BUFFER, 0);
     }
 
     void updateUboData() {
-		uploadData.cameraPos = camera->Position;
-		uploadData.projection = glm::perspective(glm::radians(camera->Zoom), static_cast<float>(screen_width) / static_cast<float>(screen_height), 0.1f, 500.0f);
-		uploadData.view = camera->GetViewMatrix();
+		CameraUploadData.cameraPos = camera->Position;
+		CameraUploadData.projection = glm::perspective(glm::radians(camera->Zoom), static_cast<float>(screen_width) / static_cast<float>(screen_height), 0.1f, 500.0f);
+		CameraUploadData.view = camera->GetViewMatrix();
 	}
 
     void poll_events() {
@@ -164,7 +197,7 @@ class Renderer {
     }
 
     // render loop
-	void render(Scene & _scene, bool render_ImGUI = true) {
+	void render(const Scene & _scene, bool render_ImGUI = true) {
         // update the UBO data
         updateUboData();
 
@@ -179,21 +212,18 @@ class Renderer {
         
 
         // get light info
-        std::vector<Light*> & sceneLights = _scene.sceneLights;
+        const std::vector<std::unique_ptr<Light>> & sceneLights = _scene.sceneLights;
         // currently we only support one light and it is a point light
         if (sceneLights.size() > 0) {
-            Light * light = sceneLights[0];
+            Light * light = sceneLights[0].get();
             if (light->lightType == POINT_LIGHT) {
                 PointLight * pointLight = dynamic_cast<PointLight*>(light);
-                context->lightPos = pointLight->position;
-                context->lightColor = pointLight->color;
-                context->lightCount = sceneLights.size();
-                context->ambientColor = glm::vec3(0.4,0.4,0.5);
+                // do something with the point light, but not implemented yet...
             }
         }
 
         // compute pass
-        std::vector<std::shared_ptr<ComputeComponent>> & computeQueue = _scene.computeQueue;
+        const std::vector<std::shared_ptr<ComputeComponent>> & computeQueue = _scene.computeQueue;
         // compute the scene using openGL compute shader
         for (auto computeComponent : computeQueue) {
             if (computeComponent->active) {
@@ -205,7 +235,7 @@ class Renderer {
         // so that user can define the render pass order and the framebuffer will be automatically generated and switched
         // glBindFramebuffer(GL_FRAMEBUFFER, 1); // use the default framebuffer
         // render pass
-        std::vector<std::shared_ptr<RenderComponent>> & renderQueue = _scene.renderQueue;
+        const std::vector<std::shared_ptr<RenderComponent>> & renderQueue = _scene.renderQueue;
         // render the scene using openGL rasterization pipeline
         for (auto renderComponent : renderQueue) {
             if (renderComponent->active) {

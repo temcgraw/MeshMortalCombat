@@ -8,29 +8,40 @@ uniform sampler2D texture1;
 uniform vec4 color; // the base color of the object, it also contains the opacity
 uniform bool useTexture = false;
 uniform int MaterialType = 0; //  0: lambertian, 1: metal, 2: dielectric, 3: emissive(light source), -1: unknown
+uniform bool isBackFace = false; // if the fragment is on the back face of the object, we need to flip the normal
 
 uniform samplerCube skyboxTexture; // Cubemap纹理
 
-layout(std140, binding = 0) uniform RenderInfo{
+layout(std140, binding = 0) uniform RenderCameraInfo{
     mat4 view;
     mat4 projection;
     vec3 cameraPos;
+};
+
+layout(std140, binding = 10) uniform RenderLightInfo{
+    bool bUsePointLight;
+    int PointLightCount;
+    vec3 PointLightPos1;
+    vec3 PointLightColor1;
+    vec3 PointLightPos2;
+    vec3 PointLightColor2;
+    vec3 PointLightPos3;
+    vec3 PointLightColor3;
+    bool bUseDirectionalLight;
+    vec3 DirectionalLightDir;
+    vec3 DirectionalLightColor;
+    vec3 AmbientLightColor;
 };
 
 uniform float refractionRatio = 0.3; // aka η aka eta (index of refraction)
 uniform float averageSlope = 0.5;  // aka m (roughness)
 
 
-// light properties
+// point light properties
 uniform int numOfLights = 1; // not support multiple lights currently, but it won't to too hard to implement
-uniform vec3 lightPos; // a point light
-uniform vec3 lightColor; 
-uniform vec3 ambientLightColor; // environment light, usually set to sky color
 
-// add a directional light
-uniform vec3 DirectionalLightDir = vec3(1.0, -1.0, -0.5);
-uniform vec3 DirectionalLightColor = vec3(1.0, 1.0, 1.0);
-uniform bool useDirectionalLight = true;
+
+
 
 
 const float PI = 3.14159265359;
@@ -62,7 +73,10 @@ void main()
     vec3 finalColor, ambientColor, diffuseColor, specularColor;
 
     vec3 normal = normalize(Normal);
-    vec3 lightDir = normalize(lightPos - FragPos);
+    if(isBackFace){
+        normal = -normal;
+    }
+    vec3 lightDir = normalize(PointLightPos1 - FragPos);
     vec3 viewDir = normalize(cameraPos - FragPos);
     vec3 halfwayDir = normalize(lightDir + viewDir);
     float NdotH = dot(normal, halfwayDir);
@@ -70,18 +84,18 @@ void main()
     float NdotV = dot(normal, viewDir);
     float VdotH = dot(viewDir, halfwayDir);
 
-    float Distance = length(lightPos - FragPos);
+    float Distance = length(PointLightPos1 - FragPos);
     float attenuation = 1.0 / (Constant + Linear * Distance + Quadratic * Distance * Distance);
 
 
     vec4 baseColor = texColor * color;
 
     // ambient
-    ambientColor = baseColor.xyz * ambientLightColor;
+    ambientColor = baseColor.xyz * AmbientLightColor;
     ambientColor = max(ambientColor, vec3(0.0,0.0,0.0));
     // diffuse
     float diff = max(NdotL, 0.0);
-    diffuseColor =  baseColor.xyz * lightColor * diff;
+    diffuseColor =  baseColor.xyz * PointLightColor1 * diff;
     diffuseColor *= attenuation;
     diffuseColor = max(diffuseColor, vec3(0.0,0.0,0.0));
     // specular -- Cook-Torrance BRDF
@@ -110,14 +124,14 @@ void main()
     // combine
     float FDG = D * F * G;
 
-    specularColor = ( FDG / (PI * max(NdotV,epsilon)) )* lightColor *  baseColor.xyz;
+    specularColor = ( FDG / (PI * max(NdotV,epsilon)) )* PointLightColor1 *  baseColor.xyz;
     specularColor *= attenuation;
     specularColor = max(specularColor, vec3(0.0,0.0,0.0));
 
     
     // ---------------------------------------------------------------------------
     // directional light
-    if(useDirectionalLight){
+    if(bUseDirectionalLight){
         // diffuse
         float diffDir = max(dot(normal, -DirectionalLightDir), 0.0);
         vec3 diffuseColorDir = baseColor.xyz * DirectionalLightColor * diffDir;

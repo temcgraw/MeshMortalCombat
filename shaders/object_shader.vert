@@ -6,10 +6,25 @@ layout (location = 2) in vec2 aTexCoord;
 
 uniform mat4 model;
 
-layout(std140, binding = 0) uniform RenderInfo{
+layout(std140, binding = 0) uniform RenderCameraInfo{
     mat4 view;
     mat4 projection;
     vec3 cameraPos;
+};
+
+layout(std140, binding = 10) uniform RenderLightInfo{
+    bool bUsePointLight;
+    int PointLightCount;
+    vec3 PointLightPos1;
+    vec3 PointLightColor1;
+    vec3 PointLightPos2;
+    vec3 PointLightColor2;
+    vec3 PointLightPos3;
+    vec3 PointLightColor3;
+    bool bUseDirectionalLight;
+    vec3 DirectionalLightDir;
+    vec3 DirectionalLightColor;
+    vec3 AmbientLightColor;
 };
 
 out vec2 TexCoords;

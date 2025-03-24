@@ -36,8 +36,8 @@ public:
     bool ObtainDestructiveCSSceneObject(){
         DestructiveCSSceneObject * destructiveCSSyetem = nullptr;
         // try find the DestructiveCSSceneObject in the scene objects
-        for (SceneObject * sceneObject : SceneManager::GetInstance().getSceneObjects()) {
-            DestructiveCSSceneObject * destructiveCSSceneObject = dynamic_cast<DestructiveCSSceneObject*>(sceneObject);
+        for (const auto & sceneObject : SceneManager::GetInstance().getSceneObjects()) {
+            DestructiveCSSceneObject * destructiveCSSceneObject = dynamic_cast<DestructiveCSSceneObject*>(sceneObject.get());
             if (destructiveCSSceneObject) {
                 destructiveCSSyetem = destructiveCSSceneObject;
                 break;

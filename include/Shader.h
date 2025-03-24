@@ -73,6 +73,10 @@ public:
     // default constructor, just for inheritance, do nothing
     Shader() : ID(0) {}
 
+    virtual ~Shader() {
+        glDeleteProgram(ID);
+    }
+
     // activate the shader
     // ------------------------------------------------------------------------
     void use() const
@@ -206,6 +210,10 @@ class ComputeShader : public Shader
         // delete the shaders as they're linked into our program now and no longer necessery
         glDeleteShader(compute);
 
+    }
+
+    virtual ~ComputeShader() {
+        glDeleteProgram(ID);
     }
 };
 

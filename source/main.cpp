@@ -22,10 +22,8 @@ int main() {
     // -----------------------------------------------------------------------------------------
     // ---- create renderer, which is used for rendering ---------------------------------------
     Renderer renderer(initial_width, initial_height, camera);
-    RenderContext * renderContext = renderer.context; // get the render context from the renderer
     // -----------------------------------------------------------------------------------------
     // ------------------------------ create Scene object --------------------------------------
-    SceneManager::GetInstance().setRenderContext(renderContext); // set the render context to the scene manager
     // create Scene object, which contains all the objects in the Scene
     SceneManager::GetInstance().switchScene(SCENE1); // switch to the initial scene
     Scene *Scene = SceneManager::GetInstance().getScene();
@@ -99,12 +97,12 @@ int main() {
         inputHandler->processKeyboardInput(); // process input will be disabled in ray tracing state by disabling renderer's keyboard input
 
 
-        std::vector<SceneObject*> & sceneObjects = SceneManager::GetInstance().getSceneObjects();
+        std::vector<std::unique_ptr<SceneObject>> & sceneObjects = SceneManager::GetInstance().getSceneObjects();
 
 
         // Tick all the scene objects
         if (enable_scene_tick){
-            for (SceneObject * sceneObject : sceneObjects) {
+            for (const auto & sceneObject : sceneObjects) {
                 sceneObject->Tick(deltaTime);
             }
         }

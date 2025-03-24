@@ -142,6 +142,20 @@ public:
         ParticleVGSFaceTimer = new AsyncGPUTimer("ParticleVGSFace",bPrintTimerInfo,TimerDelayFrames);
         ParticleVGSVoxelTimer = new AsyncGPUTimer("ParticleVGSVoxel",bPrintTimerInfo,TimerDelayFrames);
     }
+    ~DestructiveCSComponent() {
+        delete ComponentTimer;
+        delete ParticleCollisionTimer;
+        delete ParticleUniformGridTimer;
+        delete ParticlePrefixSumTimer;
+        delete ParticleVGSFaceTimer;
+        delete ParticleVGSVoxelTimer;
+        // also delete shaders
+        delete particleCollisionShader;
+        delete particleUniformGridShader;
+        delete particlePrefixSumShader;
+        delete particleVGSFaceShader;
+        delete particleVGSVoxelShader;
+    }
     void initializeVoxels(const vector3d<float> &_voxels, const vector3d<std::vector<pos_norm>> & _embeddedSurfaceMesh, const vector3d<std::vector<pos_norm>> & _embeddedVoxelMesh, glm::mat4 _modelMatrix = glm::mat4(1.0f)) {
         particles.clear();
         particles.shrink_to_fit();
@@ -229,7 +243,7 @@ public:
         // face constraints: each voxel has 6 face constraints, and every two adjacent voxels share a face constraint
         // we need to generate face constraints for each pair of adjacent voxels
         const glm::ivec3 grid_size = _voxels.size();
-        std::vector<float> strainLimit({0.5f, -0.5f}); // strain limit for face constraints
+        std::vector<float> strainLimit({0.8f, -0.8f}); // strain limit for face constraints
         //std::vector<float> strainLimit({0.0f, -0.0f}); // strain limit for face constraints
         //Create face constraints
         glm::ivec3 vox_ix;
@@ -874,7 +888,7 @@ public:
 
 class DestructiveRenderComponent : public RenderComponent {
 public:
-    DestructiveRenderComponent(RenderContext * _context = nullptr, enum renderQueue _renderPriority = OPAQUE) {
+    DestructiveRenderComponent(enum renderQueue _renderPriority = OPAQUE) {
         this->renderPriority = _renderPriority;
         // initialize the particle shader
         particleShader = new Shader("shaders/particle.vert", "shaders/particle.frag");
@@ -888,10 +902,19 @@ public:
         debugShader = new Shader("shaders/debug_AABB.vert", "shaders/debug_AABB.frag");
         glGenVertexArrays(1, &debug_VAO); // openGL sometimes requires a VAO to draw something, even if we don't use it
         rawMesh = nullptr;
-        // initialize projectile shaders
+        // initialize the shader for rendering the projectiles and boundary box
         // currently just use common object shader
-        ProjectileShader = new Shader("shaders/object_shader.vert", "shaders/object_shader.frag");
-
+        GeneralObjectShader = new Shader("shaders/object_shader.vert", "shaders/object_shader.frag");
+        sphereProjectile = new GSphere(glm::vec3(0.0f),1.0f);// base radius is 1.0, centered at origin
+        sphereProjectile->setShader(GeneralObjectShader);
+        sphereProjectile->setColor(glm::vec4(0.7f, 0.7f, 0.3f, 1.0f));
+        boxProjectile = new GCube(glm::vec3(0.0f), 2.0f);// base shape is [-1,1]x[-1,1]x[-1,1], centered at origin
+        boxProjectile->setShader(GeneralObjectShader);
+        boxProjectile->setColor(glm::vec4(0.7f, 0.75f, 0.7f, 1.0f));
+        boundaryBox = new GCube(glm::vec3(0.0f), 2.0f);// base shape is [-1,1]x[-1,1]x[-1,1], centered at origin
+        boundaryBox->setShader(GeneralObjectShader);
+        boundaryBox->setColor(glm::vec4(0.3f, 0.3f, 0.3f, 1.0f));
+        boundaryBox->setIsBackFace(true);
 
 
         // initialize the timers
@@ -906,6 +929,24 @@ public:
     AsyncGPUTimer * ParticleRenderTimer;
     AsyncGPUTimer * VoxelRenderTimer;
     AsyncGPUTimer * SkinMeshRenderTimer;
+    ~DestructiveRenderComponent(){
+        delete sphereProjectile;
+        delete boxProjectile;
+        delete boundaryBox;
+        glDeleteVertexArrays(1, &particle_VAO);
+        glDeleteBuffers(1, &particle_VBO);
+        glDeleteBuffers(1, &particle_EBO);
+        glDeleteVertexArrays(1, &debug_VAO);
+        delete TotalRenderTimer;
+        delete ParticleRenderTimer;
+        delete VoxelRenderTimer;
+        delete SkinMeshRenderTimer;
+        delete particleShader;
+        delete voxelShader;
+        delete skinShader;
+        delete debugShader;
+        delete GeneralObjectShader;
+    }
     void Render() override {
         TotalRenderTimer->Start();
         // if the compute component is not set, we cannot render the particles
@@ -921,6 +962,7 @@ public:
             // bind the particle buffer as SSBO for instance's positions
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, computeComponent.lock()->inputParticleBindingPoint, computeComponent.lock()->getParticleBuffer()[0]);
             // instance rendering, use glDrawArraysInstanced
+            glCullFace(GL_BACK);
             glDrawElementsInstanced(GL_TRIANGLES, 1200, GL_UNSIGNED_INT, 0, computeComponent.lock()->getNumParticles());
 		    glBindVertexArray(0);
             ParticleRenderTimer->Stop();
@@ -936,7 +978,10 @@ public:
         debugShader->setVec3("AABB_max", AABB_max);
         debugShader->setVec4("lineColor", glm::vec4(0.3, 1, 1, 1));
         glDrawArrays(GL_LINES, 0, 24);
-        glBindVertexArray(0);
+        
+        boundaryBox->setModel(model);
+        boundaryBox->draw();
+        
         // -------------------------------------------------------------------
         // --------------------voxel rendering--------------------------------
         if(bRenderVoxels){
@@ -948,6 +993,7 @@ public:
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, computeComponent.lock()->inputParticleBindingPoint, computeComponent.lock()->getParticleBuffer()[0]);
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, computeComponent.lock()->voxelConstraintsBindingPoint, computeComponent.lock()->getVoxelConstraintsBuffer());
             // no instance rendering, just draw the voxel mesh by drawing a lot of vertices which are generated by reading the voxel data and particle data
+            glCullFace(GL_BACK);
             glDrawArrays(GL_TRIANGLES, 0, computeComponent.lock()->getNumVoxels() * 36);
             glBindVertexArray(0);
             VoxelRenderTimer->Stop();
@@ -968,12 +1014,14 @@ public:
             //glDisable(GL_CULL_FACE); // disable culling for now, have some bug with the ccw and cw embedding voxels
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, computeComponent.lock()->embeddedMeshBufferBindingPoint, computeComponent.lock()->getEmbeddedMeshVoxelBuffer());
             skinShader->setVec4("color", glm::vec4(1.0f, 0.5f, 0.8f, 1.0f));
+            glCullFace(GL_BACK);
             glDrawArrays(GL_TRIANGLES, 0, computeComponent.lock()->getNumEmbeddedVoxelVertices());
             //glEnable(GL_DEPTH_TEST);
             //glEnable(GL_CULL_FACE); // enable culling
             // no instance rendering, just draw the voxel mesh by drawing a lot of vertices which are generated by reading the voxel data and particle data
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, computeComponent.lock()->embeddedMeshBufferBindingPoint, computeComponent.lock()->getEmbeddedMeshBuffer());
             skinShader->setVec4("color", glm::vec4(0.6f, 0.5f, 0.7f, 1.0f));
+            glCullFace(GL_BACK);
             glDrawArrays(GL_TRIANGLES, 0, computeComponent.lock()->getNumEmbeddedVertices());
             
             glBindVertexArray(0);
@@ -983,11 +1031,6 @@ public:
 
         // --------------------original mesh rendering------------------------
         if(rawMesh != nullptr && brenderOriginalMesh){
-            // render the target mesh
-            // TODO: get rid of uniform context but use ubo context instead
-            // if (context != nullptr) {
-            //     rawMesh->prepareDraw(context);
-            // }
             rawMesh->draw();
         }
         // -------------------------------------------------------------------
@@ -999,26 +1042,18 @@ public:
             glm::mat4 model = glm::mat4(1.0f);
             model = glm::translate(model, glm::vec3(spherePosAndRadius));
             model = glm::scale(model, glm::vec3(spherePosAndRadius.w));
-            ProjectileShader->use();
-            ProjectileShader->setMat4("model", model);
-            ProjectileShader->setVec4("color", glm::vec4(0.7f, 0.7f, 0.3f, 1.0f));
-            glBindVertexArray(sphere_VAO);
-            glDrawElements(GL_TRIANGLES, 1200, GL_UNSIGNED_INT, 0);
-            glBindVertexArray(0);
+            sphereProjectile->setModel(model);
+            sphereProjectile->draw();
         }
         // render the box projectile
         std::pair<glm::mat4, glm::vec3> boxTransAndSize = computeComponent.lock()->getBoxProjectileTransAndSize();
         if(boxTransAndSize.second != glm::vec3(0.0f, 0.0f, 0.0f)){
             glm::mat4 model = boxTransAndSize.first;
             model = glm::scale(model, boxTransAndSize.second);
-            ProjectileShader->use();
-            ProjectileShader->setMat4("model", model);
-            ProjectileShader->setVec4("color", glm::vec4(0.7f, 0.7f, 0.7f, 1.0f));
-            glBindVertexArray(cube_VAO);
-            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
-            glBindVertexArray(0);
+            boxProjectile->setModel(model);
+            boxProjectile->draw();
         }
-
+        
 
 
 
@@ -1051,7 +1086,7 @@ private:
     std::weak_ptr<DestructiveCSComponent> computeComponent;
     // we use instancing to render the particles
     // but we still need to use a VAO, VBO, EBO to store the particle mesh data
-    GLuint particle_VAO, particle_VBO, particle_EBO, sphere_VAO, cube_VAO, cube_VBO, cube_EBO;
+    GLuint particle_VAO, particle_VBO, particle_EBO;
     // we also need a shader to render the particles
     Shader * particleShader;
     // and a shader to optionally render the voxels via particle data
@@ -1060,9 +1095,10 @@ private:
     Shader * skinShader;
     // also a debug shader to render the AABB stuff ... maybe not necessary
     Shader * debugShader;
-    // also shaders for projectiles
-    Shader * ProjectileShader;
-    GMVPObject * rawMesh;
+    // also shaders for projectiles, boundary box, etc., we use GObject to manage the rendering
+    Shader * GeneralObjectShader;
+    GMVPObject * sphereProjectile, * boxProjectile, * boundaryBox;
+    GMVPObject * rawMesh;// doesn't belong to this class, just for rendering the original mesh, so no need to delete it
     bool brenderOriginalMesh = true;
     // though we don't need any VBO or EBO for debug rendering, I found it is necessary to create a VAO
     // otherwise, the draw call will be automatically ignored by the OpenGL...
@@ -1135,98 +1171,8 @@ private:
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, particle_EBO); // bind EBO
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(GLuint) * sphereIndices.size(), sphereIndices.data(), GL_STATIC_DRAW); // copy the index data to EBO
 		glBindVertexArray(0);
-        // also, the sphere projectile shader will use this VBO and EBO
-        glGenVertexArrays(1, &sphere_VAO);
-        glBindVertexArray(sphere_VAO);
-        glBindBuffer(GL_ARRAY_BUFFER, particle_VBO);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0); // set vertex attribute pointers: position
-		glEnableVertexAttribArray(0); // activate vertex attribute
-		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float))); // set vertex attribute pointers: normal
-		glEnableVertexAttribArray(1); // activate vertex attribute
-		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float))); // set vertex attribute pointers: uv
-		glEnableVertexAttribArray(2); // activate vertex attribute
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, particle_EBO); // bind EBO
-        glBindVertexArray(0);
-        // then is the cube buffer for box projectile
-        // the cube is centered at the origin, and the size is 2.0f
-        // it has to be like this, since vertices with same position but different normals and uvs are not allowed in the same VBO
-        std::vector<GLfloat> cubeVertices = {
-            // -------- Face 1: bottom 
-            // Triangle 1
-            1.0f, -1.0f, -1.0f,    0.0f, -1.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn1
-            1.0f, -1.0f,  1.0f,    0.0f, -1.0f, 0.0f,    1.0f, 0.0f, // v2, vt2, vn1
-            -1.0f, -1.0f,  1.0f,    0.0f, -1.0f, 0.0f,    0.0f, 0.0f, // v3, vt3, vn1
-            // Triangle 2
-            1.0f, -1.0f, -1.0f,    0.0f, -1.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn1
-            -1.0f, -1.0f,  1.0f,    0.0f, -1.0f, 0.0f,    0.0f, 0.0f, // v3, vt3, vn1
-            -1.0f, -1.0f, -1.0f,    0.0f, -1.0f, 0.0f,    0.0f, 1.0f, // v4, vt4, vn1
-            // -------- Face 2: top
-            // Triangle 1
-            1.0f,  1.0f, -1.0f,    0.0f,  1.0f, 0.0f,    1.0f, 1.0f, // v5, vt1, vn2
-            -1.0f,  1.0f, -1.0f,    0.0f,  1.0f, 0.0f,    0.0f, 1.0f, // v8, vt4, vn2
-            -1.0f,  1.0f,  1.0f,    0.0f,  1.0f, 0.0f,    0.0f, 0.0f, // v7, vt3, vn2
-            // Triangle 2
-            1.0f,  1.0f, -1.0f,    0.0f,  1.0f, 0.0f,    1.0f, 1.0f, // v5, vt1, vn2
-            -1.0f,  1.0f,  1.0f,    0.0f,  1.0f, 0.0f,    0.0f, 0.0f, // v7, vt3, vn2
-            1.0f,  1.0f,  1.0f,    0.0f,  1.0f, 0.0f,    1.0f, 0.0f, // v6, vt2, vn2
-            // -------- Face 3: right
-            // Triangle 1
-            1.0f, -1.0f, -1.0f,    1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn3
-            1.0f,  1.0f, -1.0f,    1.0f,  0.0f, 0.0f,    1.0f, 0.0f, // v5, vt2, vn3
-            1.0f,  1.0f,  1.0f,    1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v6, vt3, vn3
-            // Triangle 2
-            1.0f, -1.0f, -1.0f,    1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v1, vt1, vn3
-            1.0f,  1.0f,  1.0f,    1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v6, vt3, vn3
-            1.0f, -1.0f,  1.0f,    1.0f,  0.0f, 0.0f,    0.0f, 1.0f, // v2, vt4, vn3
-            // -------- Face 4: front
-            // Triangle 1
-            1.0f, -1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    1.0f, 1.0f, // v2, vt1, vn4
-            1.0f,  1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    1.0f, 0.0f, // v6, vt2, vn4
-            -1.0f,  1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    0.0f, 0.0f, // v7, vt3, vn4
-            // Triangle 2
-            1.0f, -1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    1.0f, 1.0f, // v2, vt1, vn4
-            -1.0f,  1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    0.0f, 0.0f, // v7, vt3, vn4
-            -1.0f, -1.0f,  1.0f,    0.0f,  0.0f, 1.0f,    0.0f, 1.0f, // v3, vt4, vn4
-            // -------- Face 5: left
-            // Triangle 1
-            -1.0f, -1.0f,  1.0f,   -1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v3, vt1, vn5
-            -1.0f,  1.0f,  1.0f,   -1.0f,  0.0f, 0.0f,    1.0f, 0.0f, // v7, vt2, vn5
-            -1.0f,  1.0f, -1.0f,   -1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v8, vt3, vn5
-            // Triangle 2
-            -1.0f, -1.0f,  1.0f,   -1.0f,  0.0f, 0.0f,    1.0f, 1.0f, // v3, vt1, vn5
-            -1.0f,  1.0f, -1.0f,   -1.0f,  0.0f, 0.0f,    0.0f, 0.0f, // v8, vt3, vn5
-            -1.0f, -1.0f, -1.0f,   -1.0f,  0.0f, 0.0f,    0.0f, 1.0f, // v4, vt4, vn5
-            // -------- Face 6: back
-            // Triangle 1
-            -1.0f, -1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   1.0f, 1.0f, // v4, vt1, vn6
-            -1.0f,  1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   1.0f, 0.0f, // v8, vt2, vn6
-            1.0f,  1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   0.0f, 0.0f, // v5, vt3, vn6
-            // Triangle 2
-            -1.0f, -1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   1.0f, 1.0f, // v4, vt1, vn6
-            1.0f,  1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   0.0f, 0.0f, // v5, vt3, vn6
-            1.0f, -1.0f, -1.0f,    0.0f,  0.0f, -1.0f,   0.0f, 1.0f  // v1, vt4, vn6
-        };
-        std::vector<GLuint> cubeIndices(36);
-        for (GLuint i = 0; i < 36; ++i){
-            cubeIndices[i] = i;
-        }
-        glGenVertexArrays(1, &cube_VAO);
-        glGenBuffers(1, &cube_VBO);
-        glGenBuffers(1, &cube_EBO);
-        glBindVertexArray(cube_VAO);
-        glBindBuffer(GL_ARRAY_BUFFER, cube_VBO);
-        glBufferData(GL_ARRAY_BUFFER, cubeVertices.size() * sizeof(GLfloat), cubeVertices.data(), GL_STATIC_DRAW);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cube_EBO);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, cubeIndices.size() * sizeof(GLuint), cubeIndices.data(), GL_STATIC_DRAW);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (void*)0);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (void*)(6 * sizeof(GLfloat)));
-        glEnableVertexAttribArray(2);
-        glBindVertexArray(0);
-            
 
+        
 	}
 };
 
@@ -1236,7 +1182,7 @@ private:
 // and also in the end it uses the data to render the object via vs and fs
 class DestructiveCSSceneObject : public RenderableSceneObject, public ComputeSceneObject {
 public:
-    DestructiveCSSceneObject(std::shared_ptr<GModel> _targetMesh, enum renderQueue _renderPriority = OPAQUE, RenderContext * _context = nullptr) : RenderableSceneObject() {
+    DestructiveCSSceneObject(std::shared_ptr<GModel> _targetMesh, enum renderQueue _renderPriority = OPAQUE) : RenderableSceneObject() {
         this->rawMesh = _targetMesh;
         if(rawMesh){
             this->voxelGeneratorComponent = std::make_shared<VoxelGeneratorComponent>(rawMesh.get(),glm::ivec3(32,32,32));
@@ -1255,7 +1201,7 @@ public:
         // first we initialize the compute component
         this->computeComponent = std::make_shared<DestructiveCSComponent>();
         // then we initialize the render component
-        this->renderComponent = std::make_shared<DestructiveRenderComponent>(_context, _renderPriority);
+        this->renderComponent = std::make_shared<DestructiveRenderComponent>(_renderPriority);
         // computeComponent initializes the particle data
         // and the renderComponent uses the particle data to render the object
         this->DestructiveCompute = std::dynamic_pointer_cast<DestructiveCSComponent>(this->computeComponent);

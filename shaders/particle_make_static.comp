@@ -76,13 +76,13 @@ void main()
 		return;
 	}
 	if(selectPattern==1){// select by distance between X plane
-		if(abs(pi.xpos.x-PatternParam)<PatternParam)
+		if(abs(abs(pi.xpos.x)-PatternParam)<PatternParam)
 			return;
 		pi.xprev.w = 0.0;// static
 		particles[gid] = pi;
 	}
 	if(selectPattern==2){// select by distance between Y plane
-		if(abs(pi.xpos.y-PatternParam)<PatternParam)
+		if(abs(abs(pi.xpos.y)-PatternParam)<PatternParam)
 			return;
 		pi.xprev.w = 0.0;// static
 		particles[gid] = pi;
