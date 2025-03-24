@@ -28,8 +28,6 @@ enum SceneName {
 
 class Scene {
 public:
-    // TODO: use smart pointers
-    // and fix all memory leaks...
     std::vector<std::unique_ptr<SceneObject>> sceneObjects;
     std::vector<std::shared_ptr<RenderComponent>> renderQueue; // object components to be rendered each frame
     std::vector<std::shared_ptr<ComputeComponent>> computeQueue; // object components to be computed via compute shader each frame
