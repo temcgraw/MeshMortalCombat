@@ -6,7 +6,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 
-project(DestructibleAdaptiveGrid)
+project(DestructibleVoxelSystem)
 
 # Compile dependencies
 add_subdirectory(./3rd_party/glfw-3.3.8)
