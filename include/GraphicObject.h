@@ -620,8 +620,8 @@ class GMesh : public GMVPObject {
 		}
 
 		// expand the bounding box a little bit
-		AA -= glm::vec3(1e-4f);
-		BB += glm::vec3(1e-4f);
+		AA -= glm::vec3(1e-8f);
+		BB += glm::vec3(1e-8f);
 
 		std::cout<<"[GMesh]: "<<positions.size()<<" vertices, "<<indices.size()<<" indices"<<std::endl;
 		std::cout<<"[GMesh]: AABB: "<<AA.x<<","<<AA.y<<","<<AA.z<<" "<<BB.x<<","<<BB.y<<","<<BB.z<<std::endl;

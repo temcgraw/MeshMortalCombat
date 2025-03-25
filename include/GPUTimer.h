@@ -6,6 +6,7 @@
 #include <string>
 #include <iostream>
 #include <vector>
+#include <list>
 
 // offer public interface for GPUTimer and AsyncGPUTimer
 class GPUTimer {
@@ -26,11 +27,22 @@ public:
     bool GetEnabled() const { return mEnabled; }
     std::string GetName() const { return mName; }
 
+    float getAverageTimeMS() {
+        float sum = 0.0;
+        for (auto &time : frameTime_list) {
+            sum += time;
+        }
+        return sum / frameTime_list.size();
+    }
+
 protected:
     std::string mName;   
     bool mPrint = false;      
     bool mEnabled = true;    
     double mLastTimeMs; 
+    std::list<float> frameTime_list; // store the frame time in the sliding window, for average time calculation
+    const int num_frames_to_average = 100;
+    int num_frames_in_sliding_window = 0;
 };
 
 // Async GPU Timer with fixed delay frames
@@ -97,6 +109,16 @@ public:
         }
     
         mCurrentIndex = (mCurrentIndex + 1) % mBufferSize;
+
+        // store the average time in the sliding window
+        if (num_frames_in_sliding_window >= num_frames_to_average) {
+            frameTime_list.pop_front();
+            frameTime_list.push_back(mLastTimeMs);
+        }
+        else {
+            frameTime_list.push_back(mLastTimeMs);
+            num_frames_in_sliding_window++;
+        }
     }
 
 

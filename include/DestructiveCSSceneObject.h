@@ -487,8 +487,8 @@ public:
 
     void Compute() override {
         //return; // don't do anything here
-        ComponentTimer->Start();
         for(int i = 0; i < substeps; i++){
+            ComponentTimer->Start();
             // update the UBO
             SystemUBO.Time += SystemUBO.dt;
             glBindBuffer(GL_UNIFORM_BUFFER, systemUBOBuffer);
@@ -666,8 +666,8 @@ public:
             ParticleVGSFaceTimer->Stop();
 
             // ------------------------------------------------------------------------------------------------
+            ComponentTimer->Stop();
         }
-        ComponentTimer->Stop();
 
         return;
     }
@@ -781,28 +781,30 @@ public:
         if(projectileType == 0){
             mSphereRadius = 0.0f;
             mBoxSize = glm::vec3(0.0f, 0.0f, 0.0f);
-            return;
-        }
-        if(projectileType==1){// linear ball 
-            mSpherePos.z = sin(5.0f * SystemUBO.Time+1.0f);
-            mSphereRadius = 0.25f;
         }
         else{
-            mSphereRadius = 0.0f;
+            if(projectileType==1){// linear ball 
+                mSpherePos.z = sin(5.0f * SystemUBO.Time+1.0f);
+                mSphereRadius = 0.25f;
+            }
+            else{
+                mSphereRadius = 0.0f;
+            }
+            if(projectileType==2){// blender
+                mBoxTrans = glm::rotate(glm::translate(
+                    glm::mat4(1.0f), glm::vec3(0.0f, -0.7f, 0.0f)
+                ), 10.1f * SystemUBO.Time, glm::vec3(0.0f, 1.0f, 0.0f));
+                mBoxSize = glm::vec3(0.15f, 0.03f, 0.7f);
+            }
+            else{
+                mBoxSize = glm::vec3(0.0f, 0.0f, 0.0f);
+            }
         }
-        if(projectileType==2){// blender
-            mBoxTrans = glm::rotate(glm::translate(
-                glm::mat4(1.0f), glm::vec3(0.0f, -0.7f, 0.0f)
-            ), 10.1f * SystemUBO.Time, glm::vec3(0.0f, 1.0f, 0.0f));
-            mBoxSize = glm::vec3(0.15f, 0.03f, 0.7f);
-        }
-        else{
-            mBoxSize = glm::vec3(0.0f, 0.0f, 0.0f);
-        }
-        
         updateSphereProjectile(mSpherePos, mSphereRadius);
         updateBoxProjectile(mBoxTrans, mBoxSize);
     }
+
+
 
 private:
     // some data

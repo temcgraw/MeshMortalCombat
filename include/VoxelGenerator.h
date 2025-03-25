@@ -480,7 +480,9 @@ public:
          // e.g.: x direction (direction = 0): int idx = j*(grid_size.z+1)+k;
          std::vector<std::pair<int, int>> indexCalculation = {{1, 2}, {0, 2}, {0, 1}};
          
-         std::vector<std::vector<pos_norm_Triangle>> outputOBJdata(grid_size.x);
+         std::vector<std::vector<pos_norm_Triangle>> outputOBJdataX(grid_size.x);
+         std::vector<std::vector<pos_norm_Triangle>> outputOBJdataY(grid_size.y);
+         std::vector<std::vector<pos_norm_Triangle>> outputOBJdataZ(grid_size.z);
          for (int i = 0; i < grid_size.x; i++)
          for (int j = 0; j < grid_size.y; j++)
          for (int k = 0; k < grid_size.z; k++)
@@ -574,13 +576,57 @@ public:
                      pos3 = pos3 / glm::vec3(grid_size);
                      pos_norm pos_norm3 = {pos3, faceNormals[face]};
                      pos_norm_Triangle tri = {pos_norm1, pos_norm2, pos_norm3};
-                     outputOBJdata[i].push_back(tri);
+                     outputOBJdataX[i].push_back(tri);
+                  }
+               }
+               if(face == 2) {
+                  for(int id = 0; id < embeddedTriangleVertices[face].size(); id+=3) {
+                     if(id+2 >= embeddedTriangleVertices[face].size()) {
+                        break;
+                     }
+                     glm::vec3 pos1 = embeddedTriangleVertices[face][id].pos;
+                     pos1 = pos1 + glm::vec3(i, j, k);
+                     pos1 = pos1 / glm::vec3(grid_size);
+                     pos_norm pos_norm1 = {pos1, faceNormals[face]};
+                     glm::vec3 pos2 = embeddedTriangleVertices[face][id+1].pos;
+                     pos2 = pos2 + glm::vec3(i, j, k);
+                     pos2 = pos2 / glm::vec3(grid_size);
+                     pos_norm pos_norm2 = {pos2, faceNormals[face]};
+                     glm::vec3 pos3 = embeddedTriangleVertices[face][id+2].pos;
+                     pos3 = pos3 + glm::vec3(i, j, k);
+                     pos3 = pos3 / glm::vec3(grid_size);
+                     pos_norm pos_norm3 = {pos3, faceNormals[face]};
+                     pos_norm_Triangle tri = {pos_norm1, pos_norm2, pos_norm3};
+                     outputOBJdataY[j].push_back(tri);
+                  }
+               }
+               if(face == 4) {
+                  for(int id = 0; id < embeddedTriangleVertices[face].size(); id+=3) {
+                     if(id+2 >= embeddedTriangleVertices[face].size()) {
+                        break;
+                     }
+                     glm::vec3 pos1 = embeddedTriangleVertices[face][id].pos;
+                     pos1 = pos1 + glm::vec3(i, j, k);
+                     pos1 = pos1 / glm::vec3(grid_size);
+                     pos_norm pos_norm1 = {pos1, faceNormals[face]};
+                     glm::vec3 pos2 = embeddedTriangleVertices[face][id+1].pos;
+                     pos2 = pos2 + glm::vec3(i, j, k);
+                     pos2 = pos2 / glm::vec3(grid_size);
+                     pos_norm pos_norm2 = {pos2, faceNormals[face]};
+                     glm::vec3 pos3 = embeddedTriangleVertices[face][id+2].pos;
+                     pos3 = pos3 + glm::vec3(i, j, k);
+                     pos3 = pos3 / glm::vec3(grid_size);
+                     pos_norm pos_norm3 = {pos3, faceNormals[face]};
+                     pos_norm_Triangle tri = {pos_norm1, pos_norm2, pos_norm3};
+                     outputOBJdataZ[k].push_back(tri);
                   }
                }
             }
          }
          // write the boundary voxel mesh data to obj file
-         writeObj(outputOBJdata, "boundaryVoxelMesh-X.obj");
+         writeObj(outputOBJdataX, "boundaryVoxelMesh-X.obj");
+         writeObj(outputOBJdataY, "boundaryVoxelMesh-Y.obj");
+         writeObj(outputOBJdataZ, "boundaryVoxelMesh-Z.obj");
       }
    }
    void writeObj(const std::vector<std::vector<pos_norm_Triangle>>& triangles, const std::string& filename) {
